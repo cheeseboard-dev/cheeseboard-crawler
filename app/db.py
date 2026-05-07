@@ -1,11 +1,14 @@
 """asyncpg 커넥션 풀 + 테이블별 upsert 함수."""
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.models.channel import ChannelInfo

@@ -1,5 +1,8 @@
-from pydantic import BaseModel
+from __future__ import annotations
+
 from typing import Optional
+
+from pydantic import BaseModel
 
 
 class Clip(BaseModel):
@@ -9,5 +12,5 @@ class Clip(BaseModel):
     read_count: int = 0
     duration: int = 0
     thumbnail_url: Optional[str] = None
-    origin_video_id: Optional[str] = None  # videos.video_id FK
+    origin_video_id: Optional[str] = None
     link: str
