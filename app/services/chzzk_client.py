@@ -1,13 +1,16 @@
 import asyncio
 import random
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 import certifi
 import httpx
 
 from app.config import settings
 from app.exceptions import ChannelNotFoundException, ChzzkAPIException
+from app.models.channel import ChannelInfo
+from app.models.clip import Clip
+from app.models.video import Video
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -25,11 +28,11 @@ _HEADERS = {
 
 
 class ChzzkClient:
-    def __init__(self):
+    def __init__(self) -> None:
         self._client: Optional[httpx.AsyncClient] = None
         self._semaphore: Optional[asyncio.Semaphore] = None
 
-    async def start(self):
+    async def start(self) -> None:
         self._client = httpx.AsyncClient(
             headers=_HEADERS,
             follow_redirects=True,
@@ -38,12 +41,11 @@ class ChzzkClient:
         )
         self._semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
 
-    async def stop(self):
+    async def stop(self) -> None:
         if self._client:
             await self._client.aclose()
 
-    def _parse_date(self, date_val) -> str:
-        """밀리초 타임스탬프 또는 ISO/공백 구분 날짜 문자열 → '%Y-%m-%d %H:%M:%S'"""
+    def _parse_date(self, date_val: object) -> str:
         try:
             if isinstance(date_val, str):
                 try:
@@ -60,7 +62,8 @@ class ChzzkClient:
         except Exception:
             return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    async def _fetch(self, url: str, params: dict = None) -> Optional[dict]:
+    async def _fetch(self, url: str, params: Optional[dict] = None) -> Optional[dict]:
+        assert self._semaphore is not None and self._client is not None
         async with self._semaphore:
             await asyncio.sleep(random.uniform(0.5, 1.5))
             for attempt in range(settings.retry_count):
@@ -74,64 +77,63 @@ class ChzzkClient:
                         await asyncio.sleep(2**attempt)
             raise ChzzkAPIException(f"CHZZK API 요청 실패 (재시도 {settings.retry_count}회 초과): {url}")
 
-    async def get_channel(self, channel_id: str) -> dict:
+    async def get_channel(self, channel_id: str) -> ChannelInfo:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}"
         data = await self._fetch(url)
-        c = data.get("content", {})
+        c = (data or {}).get("content", {})
         if not c.get("channelId"):
             raise ChannelNotFoundException(channel_id)
-        return {
-            "channel_id": c.get("channelId"),
-            "channel_name": c.get("channelName"),
-            "channel_image_url": c.get("channelImageUrl"),
-            "follower_count": c.get("followerCount", 0),
-            "is_live": c.get("openLive", False),
-        }
+        return ChannelInfo(
+            channel_id=c["channelId"],
+            channel_name=c["channelName"],
+            profile_image_url=c.get("channelImageUrl"),
+            follower_count=c.get("followerCount", 0),
+            is_live=c.get("openLive", False),
+        )
 
     async def get_videos(
         self, channel_id: str, size: int = 30, sort_type: str = "LATEST"
-    ) -> list:
+    ) -> List[Video]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/videos"
         data = await self._fetch(url, {"size": size, "sortType": sort_type})
         if not data:
             return []
-        result = []
+        result: List[Video] = []
         for v in data.get("content", {}).get("data", []):
             date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
-            result.append(
-                {
-                    "video_no": v["videoNo"],
-                    "title": v["videoTitle"],
-                    "category": v.get("videoCategoryValue", "미지정"),
-                    "tags": v.get("tags", []),
-                    "published_at": self._parse_date(v.get(date_key)),
-                    "read_count": v.get("readCount", 0),
-                    "duration": v.get("duration", 0),
-                    "link": f"https://chzzk.naver.com/video/{v['videoNo']}",
-                }
-            )
+            result.append(Video(
+                video_no=v["videoNo"],
+                video_id=v["videoId"],
+                title=v["videoTitle"],
+                category=v.get("videoCategoryValue", "미지정"),
+                tags=v.get("tags", []),
+                published_at=self._parse_date(v.get(date_key)),
+                read_count=v.get("readCount", 0),
+                duration=v.get("duration", 0),
+                thumbnail_url=v.get("thumbnailImageUrl"),
+                link=f"https://chzzk.naver.com/video/{v['videoNo']}",
+            ))
         return result
 
     async def get_clips(
         self, channel_id: str, size: int = 50, sort_type: str = "LATEST"
-    ) -> list:
+    ) -> List[Clip]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/clips"
         data = await self._fetch(url, {"size": size, "sortType": sort_type})
         if not data:
             return []
-        result = []
+        result: List[Clip] = []
         for c in data.get("content", {}).get("data", []):
-            result.append(
-                {
-                    "clip_uid": c["clipUID"],
-                    "title": c["clipTitle"],
-                    "created_at": self._parse_date(c.get("createdDate")),
-                    "read_count": c.get("readCount", 0),
-                    "duration": c.get("duration", 0),
-                    "origin_video_no": c.get("videoNo"),
-                    "link": f"https://chzzk.naver.com/clips/{c['clipUID']}",
-                }
-            )
+            result.append(Clip(
+                clip_uid=c["clipUID"],
+                title=c["clipTitle"],
+                created_at=self._parse_date(c.get("createdDate")),
+                read_count=c.get("readCount", 0),
+                duration=c.get("duration", 0),
+                thumbnail_url=c.get("thumbnailImageUrl"),
+                origin_video_id=c.get("videoId"),  # videos.video_id FK
+                link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
+            ))
         return result
 
 

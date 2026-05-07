@@ -8,11 +8,14 @@ from typing import Dict, List, Optional
 
 from app.config import settings
 from app.exceptions import CrawlJobNotFoundException, InvalidRequestException
+from app.models.channel import ChannelInfo
+from app.models.clip import Clip
+from app.models.video import Video
 from app.services.chzzk_client import chzzk_client
 
 
 class CrawlJob:
-    def __init__(self, job_id: str, total: int):
+    def __init__(self, job_id: str, total: int) -> None:
         self.job_id = job_id
         self.status = "running"
         self.total = total
@@ -36,31 +39,42 @@ class CrawlJob:
 _jobs: Dict[str, CrawlJob] = {}
 
 
-async def crawl_channel(channel_id: str) -> dict:
+class ChannelCrawlResult:
+    def __init__(self, channel: ChannelInfo, videos: List[Video], clips: List[Clip]) -> None:
+        self.channel = channel
+        self.videos = videos
+        self.clips = clips
+        self.crawled_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def to_dict(self) -> dict:
+        return {
+            "channel": self.channel.model_dump(),
+            "videos": [v.model_dump() for v in self.videos],
+            "clips": [c.model_dump() for c in self.clips],
+            "crawled_at": self.crawled_at,
+        }
+
+
+async def crawl_channel(channel_id: str) -> ChannelCrawlResult:
     channel, videos, clips = await asyncio.gather(
         chzzk_client.get_channel(channel_id),
         chzzk_client.get_videos(channel_id),
         chzzk_client.get_clips(channel_id),
     )
-    return {
-        "channel": channel,
-        "videos": videos,
-        "clips": clips,
-        "crawled_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
+    return ChannelCrawlResult(channel=channel, videos=videos, clips=clips)
 
 
-async def run_bulk_crawl(job_id: str, channel_ids: List[str]):
+async def run_bulk_crawl(job_id: str, channel_ids: List[str]) -> None:
     job = _jobs[job_id]
     output_dir = Path(settings.output_dir)
     output_dir.mkdir(exist_ok=True)
 
     for channel_id in channel_ids:
         try:
-            data = await crawl_channel(channel_id)
+            result = await crawl_channel(channel_id)
             out_file = output_dir / f"{channel_id}.json"
             out_file.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                json.dumps(result.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
             )
             job.processed += 1
         except Exception:
@@ -76,7 +90,7 @@ async def run_bulk_crawl(job_id: str, channel_ids: List[str]):
 
 
 def load_channel_ids_from_csv(csv_path: str) -> List[str]:
-    ids = []
+    ids: List[str] = []
     try:
         with open(csv_path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):

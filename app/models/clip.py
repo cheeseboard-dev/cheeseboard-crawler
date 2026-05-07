@@ -8,5 +8,6 @@ class Clip(BaseModel):
     created_at: Optional[str] = None
     read_count: int = 0
     duration: int = 0
-    origin_video_no: Optional[int] = None
+    thumbnail_url: Optional[str] = None
+    origin_video_id: Optional[str] = None  # videos.video_id FK
     link: str
