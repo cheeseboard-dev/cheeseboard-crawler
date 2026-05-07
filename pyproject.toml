@@ -1,0 +1,7 @@
+[project]
+name = "cheeseboard-crawler"
+version = "0.1.0"
+
+[tool.taskipy.tasks]
+dev = "uvicorn app.main:app --reload"
+start = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
