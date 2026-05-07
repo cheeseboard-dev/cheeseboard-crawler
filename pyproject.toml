@@ -1,7 +1,52 @@
 [project]
 name = "cheeseboard-crawler"
 version = "0.1.0"
+requires-python = ">=3.11"
 
+# ── 실행 명령어 (pip install taskipy 후 task <name> 으로 사용) ──────────────
 [tool.taskipy.tasks]
-dev = "uvicorn app.main:app --reload"
-start = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+dev        = "uvicorn app.main:app --reload"
+start      = "uvicorn app.main:app --host 0.0.0.0 --port 8000"
+lint       = "ruff check app"
+fmt        = "ruff format app"
+typecheck  = "mypy app"
+pre-commit = "pre-commit run --all-files"
+
+# ── Ruff (linter + formatter) ─────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [
+    "api_probe.py",
+    "chzzk_pro_scraper.py",
+    "chzzk_modular_scraper.py",
+    "get_streamer_uuid_bulk.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # line length (formatter 담당)
+    "B008",  # FastAPI Depends() in default args
+]
+
+# ── Mypy (정적 타입 검사) ─────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_ignores = true
+exclude = [
+    "api_probe\\.py",
+    "chzzk_pro_scraper\\.py",
+    "chzzk_modular_scraper\\.py",
+    "get_streamer_uuid_bulk\\.py",
+]

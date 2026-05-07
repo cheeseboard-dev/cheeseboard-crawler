@@ -1,21 +1,21 @@
 """asyncpg 커넥션 풀 + 테이블별 upsert 함수."""
+
 from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
 
 import asyncpg
-
-logger = logging.getLogger(__name__)
 
 from app.config import settings
 from app.models.channel import ChannelInfo
 from app.models.clip import Clip
 from app.models.video import Video
 
-_pool: Optional[asyncpg.Pool] = None
+logger = logging.getLogger(__name__)
+
+_pool: asyncpg.Pool | None = None
 
 
 async def init_pool() -> None:
@@ -38,6 +38,7 @@ def get_pool() -> asyncpg.Pool:
 
 # ── 날짜 파싱 ──────────────────────────────────────────────────────────────────
 
+
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -50,6 +51,7 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 
 # ── upsert: streamers ──────────────────────────────────────────────────────────
+
 
 async def upsert_streamer(channel: ChannelInfo) -> None:
     pool = get_pool()
@@ -74,6 +76,7 @@ async def upsert_streamer(channel: ChannelInfo) -> None:
 
 
 # ── upsert: videos ────────────────────────────────────────────────────────────
+
 
 async def upsert_videos(channel_id: str, videos: list[Video]) -> int:
     if not videos:
@@ -115,6 +118,7 @@ async def upsert_videos(channel_id: str, videos: list[Video]) -> int:
 
 
 # ── upsert: clips ─────────────────────────────────────────────────────────────
+
 
 async def upsert_clips(channel_id: str, clips: list[Clip]) -> int:
     if not clips:
@@ -163,6 +167,7 @@ async def upsert_clips(channel_id: str, clips: list[Clip]) -> int:
 
 
 # ── crawl_jobs ────────────────────────────────────────────────────────────────
+
 
 async def create_crawl_job(job_type: str, total_streamers: int, triggered_by: str) -> str:
     job_id = str(uuid.uuid4())

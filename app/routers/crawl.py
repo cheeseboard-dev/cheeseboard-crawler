@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel
 
@@ -9,7 +7,7 @@ router = APIRouter(prefix="/crawl", tags=["crawl"])
 
 
 class BulkCrawlRequest(BaseModel):
-    channel_ids: List[str]
+    channel_ids: list[str]
 
 
 @router.post("/channel/{channel_id}")

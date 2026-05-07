@@ -1,11 +1,11 @@
 """크롤 오케스트레이션: 채널별 수집 → PostgreSQL upsert."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from app import db
 from app.exceptions import CrawlJobNotFoundException, InvalidRequestException
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # ── In-memory job 상태 ────────────────────────────────────────────────────────
 
+
 class CrawlJob:
     def __init__(self, job_id: str, total: int) -> None:
         self.job_id = job_id
@@ -27,7 +28,7 @@ class CrawlJob:
         self.processed = 0
         self.failed = 0
         self.started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.finished_at: Optional[str] = None
+        self.finished_at: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -45,6 +46,7 @@ _jobs: dict[str, CrawlJob] = {}
 
 
 # ── 채널 단건 수집 ────────────────────────────────────────────────────────────
+
 
 class ChannelCrawlResult:
     def __init__(self, channel: ChannelInfo, videos: list[Video], clips: list[Clip]) -> None:
@@ -82,6 +84,7 @@ async def crawl_channel(channel_id: str) -> ChannelCrawlResult:
 
 # ── 벌크 크롤 ─────────────────────────────────────────────────────────────────
 
+
 async def _crawl_channel_safe(job: CrawlJob, channel_id: str) -> None:
     try:
         await crawl_channel(channel_id)
@@ -91,7 +94,7 @@ async def _crawl_channel_safe(job: CrawlJob, channel_id: str) -> None:
         job.failed += 1
 
 
-async def _finish_job(job: CrawlJob, db_job_id: Optional[str]) -> None:
+async def _finish_job(job: CrawlJob, db_job_id: str | None) -> None:
     job.status = "done"
     job.finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logger.info("job=%s 완료 — processed=%d failed=%d", job.job_id, job.processed, job.failed)
@@ -106,7 +109,7 @@ async def run_bulk_crawl(job_id: str, channel_ids: list[str]) -> None:
     job = _jobs[job_id]
     logger.info("bulk crawl 시작 — job=%s total=%d", job_id, len(channel_ids))
 
-    db_job_id: Optional[str] = None
+    db_job_id: str | None = None
     try:
         db_job_id = await db.create_crawl_job(
             "incremental", total_streamers=len(channel_ids), triggered_by="user"
@@ -127,15 +130,13 @@ async def run_live_crawl(job_id: str, min_viewers: int) -> None:
     job = _jobs[job_id]
     logger.info("live crawl 시작 — job=%s min_viewers=%d", job_id, min_viewers)
 
-    db_job_id: Optional[str] = None
+    db_job_id: str | None = None
     try:
-        db_job_id = await db.create_crawl_job(
-            "incremental", total_streamers=0, triggered_by="user"
-        )
+        db_job_id = await db.create_crawl_job("incremental", total_streamers=0, triggered_by="user")
     except Exception as e:
         logger.warning("crawl_jobs 생성 실패: %s", e)
 
-    cursor: Optional[LiveCursor] = None
+    cursor: LiveCursor | None = None
     for page_num in range(_MAX_LIVE_PAGES):
         channel_ids, cursor = await chzzk_client.get_live_page(
             min_viewers=min_viewers,
@@ -156,6 +157,7 @@ async def run_live_crawl(job_id: str, min_viewers: int) -> None:
 
 
 # ── job 관리 ──────────────────────────────────────────────────────────────────
+
 
 def create_job(channel_ids: list[str]) -> CrawlJob:
     if not channel_ids:

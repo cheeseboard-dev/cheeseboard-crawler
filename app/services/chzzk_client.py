@@ -4,7 +4,7 @@ import asyncio
 import logging
 import random
 from datetime import datetime
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 import certifi
 import httpx
@@ -39,8 +39,8 @@ class LiveCursor(TypedDict):
 
 class ChzzkClient:
     def __init__(self) -> None:
-        self._client: Optional[httpx.AsyncClient] = None
-        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._client: httpx.AsyncClient | None = None
+        self._semaphore: asyncio.Semaphore | None = None
 
     async def start(self) -> None:
         self._client = httpx.AsyncClient(
@@ -62,7 +62,7 @@ class ChzzkClient:
                     dt = datetime.strptime(date_val, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     dt = datetime.strptime(date_val.split("+")[0].strip(), "%Y-%m-%dT%H:%M:%S")
-            elif isinstance(date_val, (int, float)):
+            elif isinstance(date_val, int | float):
                 if date_val > 1e11:
                     date_val /= 1000
                 dt = datetime.fromtimestamp(date_val)
@@ -72,7 +72,7 @@ class ChzzkClient:
         except Exception:
             return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    async def _fetch(self, url: str, params: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
+    async def _fetch(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         assert self._semaphore is not None and self._client is not None
         async with self._semaphore:
             await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -80,14 +80,29 @@ class ChzzkClient:
                 try:
                     res = await self._client.get(url, params=params)
                     if res.status_code == 200:
-                        return res.json()
-                    logger.warning("HTTP %d (attempt %d/%d): %s", res.status_code, attempt + 1, settings.retry_count, url)
-                    await asyncio.sleep(2 ** attempt)
+                        result: dict[str, Any] = res.json()
+                        return result
+                    logger.warning(
+                        "HTTP %d (attempt %d/%d): %s",
+                        res.status_code,
+                        attempt + 1,
+                        settings.retry_count,
+                        url,
+                    )
+                    await asyncio.sleep(2**attempt)
                 except Exception as e:
-                    logger.warning("요청 오류 (attempt %d/%d): %s — %s", attempt + 1, settings.retry_count, url, e)
+                    logger.warning(
+                        "요청 오류 (attempt %d/%d): %s — %s",
+                        attempt + 1,
+                        settings.retry_count,
+                        url,
+                        e,
+                    )
                     if attempt < settings.retry_count - 1:
-                        await asyncio.sleep(2 ** attempt)
-            raise ChzzkAPIException(f"CHZZK API 요청 실패 (재시도 {settings.retry_count}회 초과): {url}")
+                        await asyncio.sleep(2**attempt)
+            raise ChzzkAPIException(
+                f"CHZZK API 요청 실패 (재시도 {settings.retry_count}회 초과): {url}"
+            )
 
     async def get_channel(self, channel_id: str) -> ChannelInfo:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}"
@@ -114,18 +129,20 @@ class ChzzkClient:
         for v in data.get("content", {}).get("data", []):
             try:
                 date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
-                result.append(Video(
-                    video_no=v["videoNo"],
-                    video_id=v["videoId"],
-                    title=v["videoTitle"],
-                    category=v.get("videoCategoryValue", "미지정"),
-                    tags=v.get("tags", []),
-                    published_at=self._parse_date(v.get(date_key)),
-                    read_count=v.get("readCount", 0),
-                    duration=v.get("duration", 0),
-                    thumbnail_url=v.get("thumbnailImageUrl"),
-                    link=f"https://chzzk.naver.com/video/{v['videoNo']}",
-                ))
+                result.append(
+                    Video(
+                        video_no=v["videoNo"],
+                        video_id=v["videoId"],
+                        title=v["videoTitle"],
+                        category=v.get("videoCategoryValue", "미지정"),
+                        tags=v.get("tags", []),
+                        published_at=self._parse_date(v.get(date_key)),
+                        read_count=v.get("readCount", 0),
+                        duration=v.get("duration", 0),
+                        thumbnail_url=v.get("thumbnailImageUrl"),
+                        link=f"https://chzzk.naver.com/video/{v['videoNo']}",
+                    )
+                )
             except Exception as e:
                 logger.warning("video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e)
         return result
@@ -140,16 +157,18 @@ class ChzzkClient:
         result: list[Clip] = []
         for c in data.get("content", {}).get("data", []):
             try:
-                result.append(Clip(
-                    clip_uid=c["clipUID"],
-                    title=c["clipTitle"],
-                    created_at=self._parse_date(c.get("createdDate")),
-                    read_count=c.get("readCount", 0),
-                    duration=c.get("duration", 0),
-                    thumbnail_url=c.get("thumbnailImageUrl"),
-                    origin_video_id=c.get("videoId"),
-                    link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
-                ))
+                result.append(
+                    Clip(
+                        clip_uid=c["clipUID"],
+                        title=c["clipTitle"],
+                        created_at=self._parse_date(c.get("createdDate")),
+                        read_count=c.get("readCount", 0),
+                        duration=c.get("duration", 0),
+                        thumbnail_url=c.get("thumbnailImageUrl"),
+                        origin_video_id=c.get("videoId"),
+                        link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
+                    )
+                )
             except Exception as e:
                 logger.warning("clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e)
         return result
@@ -158,9 +177,9 @@ class ChzzkClient:
         self,
         min_viewers: int = 100,
         size: int = 50,
-        cursor_viewer_count: Optional[int] = None,
-        cursor_live_id: Optional[int] = None,
-    ) -> tuple[list[str], Optional[LiveCursor]]:
+        cursor_viewer_count: int | None = None,
+        cursor_live_id: int | None = None,
+    ) -> tuple[list[str], LiveCursor | None]:
         """라이브 채널 1페이지를 fetch해 channel_id 목록과 다음 커서를 반환."""
         url = f"{settings.chzzk_base_url}/lives"
         params: dict[str, Any] = {"size": size, "sortType": "POPULAR"}
@@ -174,7 +193,7 @@ class ChzzkClient:
             return [], None
 
         channel_ids: list[str] = []
-        last_item: Optional[dict[str, Any]] = None
+        last_item: dict[str, Any] | None = None
         for item in items:
             if item.get("concurrentUserCount", 0) < min_viewers:
                 logger.debug("시청자 기준 미달 — 페이지 종료 (기준: %d명)", min_viewers)
@@ -184,7 +203,7 @@ class ChzzkClient:
                 channel_ids.append(channel_id)
             last_item = item
 
-        next_cursor: Optional[LiveCursor] = None
+        next_cursor: LiveCursor | None = None
         if last_item:
             next_cursor = LiveCursor(
                 viewer_count=last_item["concurrentUserCount"],
