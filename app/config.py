@@ -12,8 +12,11 @@ class Settings(BaseSettings):
     max_concurrent_requests: int = 3
     retry_count: int = 3
 
-    streamers_csv_path: str = "streamers.csv"
+    streamers_csv_path: str = "data/streamers.csv"
     output_dir: str = "output"
+
+    # PostgreSQL
+    database_url: str = "postgresql://cheeseboard:cheeseboard@localhost:5432/cheeseboard"
 
 
 settings = Settings()

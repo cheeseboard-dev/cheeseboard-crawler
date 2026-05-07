@@ -100,19 +100,25 @@ class ChzzkClient:
             return []
         result: List[Video] = []
         for v in data.get("content", {}).get("data", []):
-            date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
-            result.append(Video(
-                video_no=v["videoNo"],
-                video_id=v["videoId"],
-                title=v["videoTitle"],
-                category=v.get("videoCategoryValue", "미지정"),
-                tags=v.get("tags", []),
-                published_at=self._parse_date(v.get(date_key)),
-                read_count=v.get("readCount", 0),
-                duration=v.get("duration", 0),
-                thumbnail_url=v.get("thumbnailImageUrl"),
-                link=f"https://chzzk.naver.com/video/{v['videoNo']}",
-            ))
+            try:
+                date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
+                result.append(Video(
+                    video_no=v["videoNo"],
+                    video_id=v["videoId"],
+                    title=v["videoTitle"],
+                    category=v.get("videoCategoryValue", "미지정"),
+                    tags=v.get("tags", []),
+                    published_at=self._parse_date(v.get(date_key)),
+                    read_count=v.get("readCount", 0),
+                    duration=v.get("duration", 0),
+                    thumbnail_url=v.get("thumbnailImageUrl"),
+                    link=f"https://chzzk.naver.com/video/{v['videoNo']}",
+                ))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e
+                )
         return result
 
     async def get_clips(
@@ -124,16 +130,22 @@ class ChzzkClient:
             return []
         result: List[Clip] = []
         for c in data.get("content", {}).get("data", []):
-            result.append(Clip(
-                clip_uid=c["clipUID"],
-                title=c["clipTitle"],
-                created_at=self._parse_date(c.get("createdDate")),
-                read_count=c.get("readCount", 0),
-                duration=c.get("duration", 0),
-                thumbnail_url=c.get("thumbnailImageUrl"),
-                origin_video_id=c.get("videoId"),  # videos.video_id FK
-                link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
-            ))
+            try:
+                result.append(Clip(
+                    clip_uid=c["clipUID"],
+                    title=c["clipTitle"],
+                    created_at=self._parse_date(c.get("createdDate")),
+                    read_count=c.get("readCount", 0),
+                    duration=c.get("duration", 0),
+                    thumbnail_url=c.get("thumbnailImageUrl"),
+                    origin_video_id=c.get("videoId"),  # videos.video_id FK
+                    link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
+                ))
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e
+                )
         return result
 
 

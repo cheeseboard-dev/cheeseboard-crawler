@@ -1,19 +1,29 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app import db
 from app.config import settings
 from app.exception_handlers import cheeseboard_exception_handler, unhandled_exception_handler
 from app.exceptions import CheeseBoardException
 from app.routers import channels, crawl
 from app.services.chzzk_client import chzzk_client
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await chzzk_client.start()
+    try:
+        await db.init_pool()
+        logging.getLogger(__name__).info("DB pool initialized")
+    except Exception as e:
+        logging.getLogger(__name__).warning("DB pool 초기화 실패 (DB 없이 기동): %s", e)
     yield
     await chzzk_client.stop()
+    await db.close_pool()
 
 
 app = FastAPI(
