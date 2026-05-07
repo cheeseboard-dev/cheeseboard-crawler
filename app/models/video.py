@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 class Video(BaseModel):
     video_no: int
-    video_id: str
+    video_id: str | None = None
     title: str
     category: str = "미지정"
     tags: list[str] = Field(default_factory=list)

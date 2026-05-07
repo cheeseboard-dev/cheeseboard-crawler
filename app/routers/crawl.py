@@ -1,24 +1,42 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel
 
 from app.services import crawler
+from app.services.crawler import CrawlMode
 
 router = APIRouter(prefix="/crawl", tags=["crawl"])
 
 
-class BulkCrawlRequest(BaseModel):
+def _default_since(since: datetime | None) -> datetime:
+    return since or (datetime.now() - timedelta(days=1))
+
+
+class ChannelListRequest(BaseModel):
     channel_ids: list[str]
+    since: datetime | None = None
 
 
 @router.post("/channel/{channel_id}")
-async def crawl_single_channel(channel_id: str):
-    return await crawler.crawl_channel(channel_id)
+async def crawl_single_channel(
+    channel_id: str,
+    since: datetime | None = Query(default=None),
+    mode: CrawlMode = Query(default="full"),
+):
+    effective_since = None if mode == "streamers_only" else _default_since(since)
+    return await crawler.crawl_channel(channel_id, since=effective_since, mode=mode)
 
 
 @router.post("/bulk")
-async def crawl_bulk(request: BulkCrawlRequest, background_tasks: BackgroundTasks):
+async def crawl_bulk(request: ChannelListRequest, background_tasks: BackgroundTasks):
     job = crawler.create_job(request.channel_ids)
-    background_tasks.add_task(crawler.run_bulk_crawl, job.job_id, request.channel_ids)
+    background_tasks.add_task(
+        crawler.run_bulk_crawl,
+        job.job_id,
+        request.channel_ids,
+        _default_since(request.since),
+    )
     return {"job_id": job.job_id, "total": len(request.channel_ids), "status": "started"}
 
 
@@ -26,10 +44,41 @@ async def crawl_bulk(request: BulkCrawlRequest, background_tasks: BackgroundTask
 async def crawl_live(
     background_tasks: BackgroundTasks,
     min_viewers: int = Query(default=100, ge=1),
+    since: datetime | None = Query(
+        default=None, description="영상/클립 수집 기준 시점. 기본값: 1일 전"
+    ),
+    mode: CrawlMode = Query(default="full", description="full | streamers_only"),
 ):
+    effective_since = None if mode == "streamers_only" else _default_since(since)
     job = crawler.create_live_job()
-    background_tasks.add_task(crawler.run_live_crawl, job.job_id, min_viewers)
-    return {"job_id": job.job_id, "status": "started"}
+    background_tasks.add_task(
+        crawler.run_live_crawl, job.job_id, min_viewers, effective_since, mode
+    )
+    return {"job_id": job.job_id, "status": "started", "mode": mode}
+
+
+@router.post("/videos")
+async def crawl_videos(request: ChannelListRequest, background_tasks: BackgroundTasks):
+    job = crawler.create_job(request.channel_ids)
+    background_tasks.add_task(
+        crawler.run_videos_crawl,
+        job.job_id,
+        request.channel_ids,
+        _default_since(request.since),
+    )
+    return {"job_id": job.job_id, "total": len(request.channel_ids), "status": "started"}
+
+
+@router.post("/clips")
+async def crawl_clips(request: ChannelListRequest, background_tasks: BackgroundTasks):
+    job = crawler.create_job(request.channel_ids)
+    background_tasks.add_task(
+        crawler.run_clips_crawl,
+        job.job_id,
+        request.channel_ids,
+        _default_since(request.since),
+    )
+    return {"job_id": job.job_id, "total": len(request.channel_ids), "status": "started"}
 
 
 @router.get("/jobs/{job_id}")

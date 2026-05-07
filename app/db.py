@@ -59,14 +59,15 @@ async def upsert_streamer(channel: ChannelInfo) -> None:
         """
         INSERT INTO streamers
             (channel_id, channel_name, profile_image_url, follower_count,
-             updated_at, last_crawled_at)
-        VALUES ($1, $2, $3, $4, NOW(), NOW())
+             updated_at, last_crawled_at, last_refreshed_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW(), NOW())
         ON CONFLICT (channel_id) DO UPDATE SET
-            channel_name      = EXCLUDED.channel_name,
-            profile_image_url = EXCLUDED.profile_image_url,
-            follower_count    = EXCLUDED.follower_count,
-            updated_at        = NOW(),
-            last_crawled_at   = NOW()
+            channel_name        = EXCLUDED.channel_name,
+            profile_image_url   = EXCLUDED.profile_image_url,
+            follower_count      = EXCLUDED.follower_count,
+            updated_at          = NOW(),
+            last_crawled_at     = NOW(),
+            last_refreshed_at   = NOW()
         """,
         channel.channel_id,
         channel.channel_name,
@@ -82,6 +83,9 @@ async def upsert_videos(channel_id: str, videos: list[Video]) -> int:
     if not videos:
         return 0
     pool = get_pool()
+    videos = [v for v in videos if v.video_id is not None]
+    if not videos:
+        return 0
     rows = [
         (
             v.video_no,
@@ -226,6 +230,12 @@ async def get_crawl_jobs(limit: int = 10) -> list[dict]:
         limit,
     )
     return [dict(r) for r in rows]
+
+
+async def get_active_channel_ids() -> list[str]:
+    pool = get_pool()
+    rows = await pool.fetch("SELECT channel_id FROM streamers WHERE is_active = TRUE")
+    return [r["channel_id"] for r in rows]
 
 
 async def get_crawl_job(job_id: str) -> dict | None:

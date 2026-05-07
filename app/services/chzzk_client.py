@@ -17,6 +17,9 @@ from app.models.video import Video
 
 logger = logging.getLogger(__name__)
 
+_MAX_VIDEO_PAGES = 10
+_MAX_CLIP_PAGES = 5
+
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -119,58 +122,102 @@ class ChzzkClient:
         )
 
     async def get_videos(
-        self, channel_id: str, size: int = 30, sort_type: str = "LATEST"
+        self,
+        channel_id: str,
+        since: datetime | None = None,
+        size: int = 30,
     ) -> list[Video]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/videos"
-        data = await self._fetch(url, {"size": size, "sortType": sort_type})
-        if not data:
-            return []
+        since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
         result: list[Video] = []
-        for v in data.get("content", {}).get("data", []):
-            try:
-                date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
-                result.append(
-                    Video(
-                        video_no=v["videoNo"],
-                        video_id=v["videoId"],
-                        title=v["videoTitle"],
-                        category=v.get("videoCategoryValue", "미지정"),
-                        tags=v.get("tags", []),
-                        published_at=self._parse_date(v.get(date_key)),
-                        read_count=v.get("readCount", 0),
-                        duration=v.get("duration", 0),
-                        thumbnail_url=v.get("thumbnailImageUrl"),
-                        link=f"https://chzzk.naver.com/video/{v['videoNo']}",
+
+        for page in range(_MAX_VIDEO_PAGES):
+            data = await self._fetch(url, {"size": size, "sortType": "LATEST", "page": page})
+            if not data:
+                break
+            items = data.get("content", {}).get("data", [])
+            if not items:
+                break
+
+            cutoff_hit = False
+            for v in items:
+                try:
+                    date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
+                    published_str = self._parse_date(v.get(date_key))
+                    if since_str and published_str and published_str < since_str:
+                        cutoff_hit = True
+                        break
+                    result.append(
+                        Video(
+                            video_no=v["videoNo"],
+                            video_id=v.get("videoId"),
+                            title=v["videoTitle"],
+                            category=v.get("videoCategoryValue", "미지정"),
+                            tags=v.get("tags", []),
+                            published_at=published_str,
+                            read_count=v.get("readCount", 0),
+                            duration=v.get("duration", 0),
+                            thumbnail_url=v.get("thumbnailImageUrl"),
+                            link=f"https://chzzk.naver.com/video/{v['videoNo']}",
+                        )
                     )
-                )
-            except Exception as e:
-                logger.warning("video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e)
+                except Exception as e:
+                    logger.warning("video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e)
+
+            if cutoff_hit or len(items) < size:
+                break
+
         return result
 
     async def get_clips(
-        self, channel_id: str, size: int = 50, sort_type: str = "LATEST"
+        self,
+        channel_id: str,
+        since: datetime | None = None,
+        size: int = 50,
     ) -> list[Clip]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/clips"
-        data = await self._fetch(url, {"size": size, "sortType": sort_type})
-        if not data:
-            return []
+        since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
         result: list[Clip] = []
-        for c in data.get("content", {}).get("data", []):
-            try:
-                result.append(
-                    Clip(
-                        clip_uid=c["clipUID"],
-                        title=c["clipTitle"],
-                        created_at=self._parse_date(c.get("createdDate")),
-                        read_count=c.get("readCount", 0),
-                        duration=c.get("duration", 0),
-                        thumbnail_url=c.get("thumbnailImageUrl"),
-                        origin_video_id=c.get("videoId"),
-                        link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
+        cursor: str | None = None
+
+        for _ in range(_MAX_CLIP_PAGES):
+            params: dict[str, Any] = {"size": size, "sortType": "LATEST"}
+            if cursor:
+                params["clipUID"] = cursor
+
+            data = await self._fetch(url, params)
+            if not data:
+                break
+            items = data.get("content", {}).get("data", [])
+            if not items:
+                break
+
+            cutoff_hit = False
+            for c in items:
+                try:
+                    created_str = self._parse_date(c.get("createdDate"))
+                    if since_str and created_str and created_str < since_str:
+                        cutoff_hit = True
+                        break
+                    result.append(
+                        Clip(
+                            clip_uid=c["clipUID"],
+                            title=c["clipTitle"],
+                            created_at=created_str,
+                            read_count=c.get("readCount", 0),
+                            duration=c.get("duration", 0),
+                            thumbnail_url=c.get("thumbnailImageUrl"),
+                            origin_video_id=c.get("videoId"),
+                            link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
+                        )
                     )
-                )
-            except Exception as e:
-                logger.warning("clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e)
+                except Exception as e:
+                    logger.warning("clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e)
+
+            if cutoff_hit or len(items) < size:
+                break
+            cursor = items[-1]["clipUID"]
+
         return result
 
     async def get_live_page(
