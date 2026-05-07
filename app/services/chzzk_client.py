@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import asyncio
+import logging
 import random
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Optional, TypedDict
 
 import certifi
 import httpx
@@ -11,6 +14,8 @@ from app.exceptions import ChannelNotFoundException, ChzzkAPIException
 from app.models.channel import ChannelInfo
 from app.models.clip import Clip
 from app.models.video import Video
+
+logger = logging.getLogger(__name__)
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
@@ -25,6 +30,11 @@ _HEADERS = {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-site",
 }
+
+
+class LiveCursor(TypedDict):
+    viewer_count: int
+    live_id: int
 
 
 class ChzzkClient:
@@ -45,7 +55,7 @@ class ChzzkClient:
         if self._client:
             await self._client.aclose()
 
-    def _parse_date(self, date_val: object) -> str:
+    def _parse_date(self, date_val: Any) -> str:
         try:
             if isinstance(date_val, str):
                 try:
@@ -62,7 +72,7 @@ class ChzzkClient:
         except Exception:
             return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    async def _fetch(self, url: str, params: Optional[dict] = None) -> Optional[dict]:
+    async def _fetch(self, url: str, params: Optional[dict[str, Any]] = None) -> Optional[dict[str, Any]]:
         assert self._semaphore is not None and self._client is not None
         async with self._semaphore:
             await asyncio.sleep(random.uniform(0.5, 1.5))
@@ -71,10 +81,12 @@ class ChzzkClient:
                     res = await self._client.get(url, params=params)
                     if res.status_code == 200:
                         return res.json()
-                    await asyncio.sleep(2**attempt)
-                except Exception:
+                    logger.warning("HTTP %d (attempt %d/%d): %s", res.status_code, attempt + 1, settings.retry_count, url)
+                    await asyncio.sleep(2 ** attempt)
+                except Exception as e:
+                    logger.warning("요청 오류 (attempt %d/%d): %s — %s", attempt + 1, settings.retry_count, url, e)
                     if attempt < settings.retry_count - 1:
-                        await asyncio.sleep(2**attempt)
+                        await asyncio.sleep(2 ** attempt)
             raise ChzzkAPIException(f"CHZZK API 요청 실패 (재시도 {settings.retry_count}회 초과): {url}")
 
     async def get_channel(self, channel_id: str) -> ChannelInfo:
@@ -93,12 +105,12 @@ class ChzzkClient:
 
     async def get_videos(
         self, channel_id: str, size: int = 30, sort_type: str = "LATEST"
-    ) -> List[Video]:
+    ) -> list[Video]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/videos"
         data = await self._fetch(url, {"size": size, "sortType": sort_type})
         if not data:
             return []
-        result: List[Video] = []
+        result: list[Video] = []
         for v in data.get("content", {}).get("data", []):
             try:
                 date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
@@ -115,20 +127,17 @@ class ChzzkClient:
                     link=f"https://chzzk.naver.com/video/{v['videoNo']}",
                 ))
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e
-                )
+                logger.warning("video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e)
         return result
 
     async def get_clips(
         self, channel_id: str, size: int = 50, sort_type: str = "LATEST"
-    ) -> List[Clip]:
+    ) -> list[Clip]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/clips"
         data = await self._fetch(url, {"size": size, "sortType": sort_type})
         if not data:
             return []
-        result: List[Clip] = []
+        result: list[Clip] = []
         for c in data.get("content", {}).get("data", []):
             try:
                 result.append(Clip(
@@ -138,15 +147,50 @@ class ChzzkClient:
                     read_count=c.get("readCount", 0),
                     duration=c.get("duration", 0),
                     thumbnail_url=c.get("thumbnailImageUrl"),
-                    origin_video_id=c.get("videoId"),  # videos.video_id FK
+                    origin_video_id=c.get("videoId"),
                     link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
                 ))
             except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e
-                )
+                logger.warning("clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e)
         return result
+
+    async def get_live_page(
+        self,
+        min_viewers: int = 100,
+        size: int = 50,
+        cursor_viewer_count: Optional[int] = None,
+        cursor_live_id: Optional[int] = None,
+    ) -> tuple[list[str], Optional[LiveCursor]]:
+        """라이브 채널 1페이지를 fetch해 channel_id 목록과 다음 커서를 반환."""
+        url = f"{settings.chzzk_base_url}/lives"
+        params: dict[str, Any] = {"size": size, "sortType": "POPULAR"}
+        if cursor_viewer_count is not None and cursor_live_id is not None:
+            params["concurrentUserCount"] = cursor_viewer_count
+            params["liveId"] = cursor_live_id
+
+        data = await self._fetch(url, params)
+        items = (data or {}).get("content", {}).get("data", [])
+        if not items:
+            return [], None
+
+        channel_ids: list[str] = []
+        last_item: Optional[dict[str, Any]] = None
+        for item in items:
+            if item.get("concurrentUserCount", 0) < min_viewers:
+                logger.debug("시청자 기준 미달 — 페이지 종료 (기준: %d명)", min_viewers)
+                return channel_ids, None
+            channel_id = (item.get("channel") or {}).get("channelId")
+            if channel_id:
+                channel_ids.append(channel_id)
+            last_item = item
+
+        next_cursor: Optional[LiveCursor] = None
+        if last_item:
+            next_cursor = LiveCursor(
+                viewer_count=last_item["concurrentUserCount"],
+                live_id=last_item["liveId"],
+            )
+        return channel_ids, next_cursor
 
 
 chzzk_client = ChzzkClient()

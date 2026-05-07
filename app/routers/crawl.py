@@ -1,17 +1,15 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel
 
-from app.config import settings
 from app.services import crawler
 
 router = APIRouter(prefix="/crawl", tags=["crawl"])
 
 
 class BulkCrawlRequest(BaseModel):
-    channel_ids: Optional[List[str]] = None
-    use_csv: bool = False
+    channel_ids: List[str]
 
 
 @router.post("/channel/{channel_id}")
@@ -21,14 +19,19 @@ async def crawl_single_channel(channel_id: str):
 
 @router.post("/bulk")
 async def crawl_bulk(request: BulkCrawlRequest, background_tasks: BackgroundTasks):
-    channel_ids = list(request.channel_ids or [])
-    if request.use_csv:
-        csv_ids = crawler.load_channel_ids_from_csv(settings.streamers_csv_path)
-        channel_ids = list(set(channel_ids + csv_ids))
+    job = crawler.create_job(request.channel_ids)
+    background_tasks.add_task(crawler.run_bulk_crawl, job.job_id, request.channel_ids)
+    return {"job_id": job.job_id, "total": len(request.channel_ids), "status": "started"}
 
-    job = crawler.create_job(channel_ids)
-    background_tasks.add_task(crawler.run_bulk_crawl, job.job_id, channel_ids)
-    return {"job_id": job.job_id, "total": len(channel_ids), "status": "started"}
+
+@router.post("/live")
+async def crawl_live(
+    background_tasks: BackgroundTasks,
+    min_viewers: int = Query(default=100, ge=1),
+):
+    job = crawler.create_live_job()
+    background_tasks.add_task(crawler.run_live_crawl, job.job_id, min_viewers)
+    return {"job_id": job.job_id, "status": "started"}
 
 
 @router.get("/jobs/{job_id}")
