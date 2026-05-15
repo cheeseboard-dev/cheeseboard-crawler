@@ -126,13 +126,16 @@ class ChzzkClient:
         channel_id: str,
         since: datetime | None = None,
         size: int = 30,
+        sort_type: str = "LATEST",
+        max_pages: int | None = _MAX_VIDEO_PAGES,
     ) -> list[Video]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/videos"
         since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
         result: list[Video] = []
 
-        for page in range(_MAX_VIDEO_PAGES):
-            data = await self._fetch(url, {"size": size, "sortType": "LATEST", "page": page})
+        page = 0
+        while max_pages is None or page < max_pages:
+            data = await self._fetch(url, {"size": size, "sortType": sort_type, "page": page})
             if not data:
                 break
             items = data.get("content", {}).get("data", [])
@@ -166,22 +169,51 @@ class ChzzkClient:
 
             if cutoff_hit or len(items) < size:
                 break
+            page += 1
 
         return result
+
+    async def get_video(self, video_no: int) -> tuple[str, Video] | None:
+        url = f"{settings.chzzk_base_url}/videos/{video_no}"
+        data = await self._fetch(url)
+        content = (data or {}).get("content")
+        if not content:
+            return None
+        channel_id = content.get("channelId") or (content.get("channel") or {}).get("channelId")
+        if not channel_id:
+            return None
+        date_key = "publishDateAt" if "publishDateAt" in content else "publishDate"
+        published_str = self._parse_date(content.get(date_key))
+        video = Video(
+            video_no=content["videoNo"],
+            video_id=content.get("videoId"),
+            title=content["videoTitle"],
+            category=content.get("videoCategoryValue", "미지정"),
+            tags=content.get("tags", []),
+            published_at=published_str,
+            read_count=content.get("readCount", 0),
+            duration=content.get("duration", 0),
+            thumbnail_url=content.get("thumbnailImageUrl"),
+            link=f"https://chzzk.naver.com/video/{content['videoNo']}",
+        )
+        return channel_id, video
 
     async def get_clips(
         self,
         channel_id: str,
         since: datetime | None = None,
         size: int = 50,
+        sort_type: str = "LATEST",
+        max_pages: int | None = _MAX_CLIP_PAGES,
     ) -> list[Clip]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/clips"
         since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
         result: list[Clip] = []
         cursor: str | None = None
 
-        for _ in range(_MAX_CLIP_PAGES):
-            params: dict[str, Any] = {"size": size, "sortType": "LATEST"}
+        page = 0
+        while max_pages is None or page < max_pages:
+            params: dict[str, Any] = {"size": size, "sortType": sort_type}
             if cursor:
                 params["clipUID"] = cursor
 
@@ -217,8 +249,31 @@ class ChzzkClient:
             if cutoff_hit or len(items) < size:
                 break
             cursor = items[-1]["clipUID"]
+            page += 1
 
         return result
+
+    async def get_clip(self, clip_uid: str) -> tuple[str, Clip] | None:
+        url = f"{settings.chzzk_base_url}/clips/{clip_uid}"
+        data = await self._fetch(url)
+        content = (data or {}).get("content")
+        if not content:
+            return None
+        channel_id = content.get("channelId") or (content.get("channel") or {}).get("channelId")
+        if not channel_id:
+            return None
+        created_str = self._parse_date(content.get("createdDate"))
+        clip = Clip(
+            clip_uid=content["clipUID"],
+            title=content["clipTitle"],
+            created_at=created_str,
+            read_count=content.get("readCount", 0),
+            duration=content.get("duration", 0),
+            thumbnail_url=content.get("thumbnailImageUrl"),
+            origin_video_id=content.get("videoId"),
+            link=f"https://chzzk.naver.com/clips/{content['clipUID']}",
+        )
+        return channel_id, clip
 
     async def get_live_page(
         self,

@@ -53,6 +53,15 @@ def _parse_dt(value: str | None) -> datetime | None:
 # ── upsert: streamers ──────────────────────────────────────────────────────────
 
 
+async def streamer_exists(channel_id: str) -> bool:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT 1 FROM streamers WHERE channel_id = $1 LIMIT 1",
+        channel_id,
+    )
+    return row is not None
+
+
 async def upsert_streamer(channel: ChannelInfo) -> None:
     pool = get_pool()
     await pool.execute(
@@ -173,21 +182,66 @@ async def upsert_clips(channel_id: str, clips: list[Clip]) -> int:
 # ── crawl_jobs ────────────────────────────────────────────────────────────────
 
 
-async def create_crawl_job(job_type: str, total_streamers: int, triggered_by: str) -> str:
-    job_id = str(uuid.uuid4())
+async def insert_crawl_job(
+    job_type: str,
+    total_streamers: int | None = None,
+    triggered_by: str | None = None,
+) -> str:
     pool = get_pool()
-    await pool.execute(
+    row = await pool.fetchrow(
         """
         INSERT INTO crawl_jobs
-            (id, job_type, started_at, status, total_streamers, triggered_by)
-        VALUES ($1, $2, NOW(), 'running', $3, $4)
+            (job_type, total_streamers, triggered_by)
+        VALUES ($1, $2, $3)
+        RETURNING id
         """,
-        job_id,
         job_type,
         total_streamers,
         triggered_by,
     )
-    return job_id
+    return str(row["id"])
+
+
+async def update_crawl_job(
+    job_id: str,
+    *,
+    status: str | None = None,
+    total_streamers: int | None = None,
+    success_count: int | None = None,
+    failed_count: int | None = None,
+    error_msg: str | None = None,
+) -> None:
+    job_uuid = uuid.UUID(job_id)
+    pool = get_pool()
+    await pool.execute(
+        """
+        UPDATE crawl_jobs
+        SET finished_at     = CASE
+                                  WHEN $2::varchar IN ('done', 'failed') THEN NOW()
+                                  ELSE finished_at
+                              END,
+            status          = COALESCE($2, status),
+            total_streamers = COALESCE($3, total_streamers),
+            success_count   = COALESCE($4, success_count),
+            failed_count    = COALESCE($5, failed_count),
+            error_msg       = COALESCE($6, error_msg)
+        WHERE id = $1
+        """,
+        job_uuid,
+        status,
+        total_streamers,
+        success_count,
+        failed_count,
+        error_msg,
+    )
+
+
+async def create_crawl_job(job_type: str, total_streamers: int, triggered_by: str) -> str:
+    return await insert_crawl_job(
+        job_type,
+        total_streamers=total_streamers,
+        triggered_by=triggered_by,
+    )
 
 
 async def finish_crawl_job(
@@ -197,23 +251,12 @@ async def finish_crawl_job(
     failed: int,
     error_msg: str | None = None,
 ) -> None:
-    status = "failed" if error_msg else "done"
-    pool = get_pool()
-    await pool.execute(
-        """
-        UPDATE crawl_jobs
-        SET finished_at   = NOW(),
-            status        = $2,
-            success_count = $3,
-            failed_count  = $4,
-            error_msg     = $5
-        WHERE id = $1
-        """,
+    await update_crawl_job(
         job_id,
-        status,
-        success,
-        failed,
-        error_msg,
+        status="failed" if error_msg else "done",
+        success_count=success,
+        failed_count=failed,
+        error_msg=error_msg,
     )
 
 
@@ -232,16 +275,88 @@ async def get_crawl_jobs(limit: int = 10) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def get_streamers(active_only: bool = False) -> list[dict]:
+    pool = get_pool()
+    query = (
+        "SELECT * FROM streamers WHERE is_active = TRUE ORDER BY channel_name"
+        if active_only
+        else "SELECT * FROM streamers ORDER BY channel_name"
+    )
+    rows = await pool.fetch(query)
+    return [dict(r) for r in rows]
+
+
+async def get_streamer_stats(channel_id: str) -> dict | None:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT s.channel_id,
+               s.channel_name,
+               s.is_active,
+               s.follower_count,
+               COALESCE(v.video_count, 0) AS video_count,
+               COALESCE(c.clip_count, 0) AS clip_count,
+               v.latest_video_published_at,
+               c.latest_clip_created_at,
+               s.updated_at AS last_crawled_at
+        FROM streamers s
+        LEFT JOIN (
+            SELECT channel_id,
+                   COUNT(*) AS video_count,
+                   MAX(published_at) AS latest_video_published_at
+            FROM videos
+            GROUP BY channel_id
+        ) v ON v.channel_id = s.channel_id
+        LEFT JOIN (
+            SELECT channel_id,
+                   COUNT(*) AS clip_count,
+                   MAX(created_at) AS latest_clip_created_at
+            FROM clips
+            GROUP BY channel_id
+        ) c ON c.channel_id = s.channel_id
+        WHERE s.channel_id = $1
+        """,
+        channel_id,
+    )
+    return dict(row) if row else None
+
+
 async def get_active_channel_ids() -> list[str]:
     pool = get_pool()
-    rows = await pool.fetch("SELECT channel_id FROM streamers WHERE is_active = TRUE")
+    rows = await pool.fetch(
+        "SELECT channel_id FROM streamers WHERE is_active = TRUE ORDER BY channel_name"
+    )
     return [r["channel_id"] for r in rows]
+
+
+async def set_streamer_active(channel_id: str, is_active: bool) -> bool:
+    pool = get_pool()
+    result: str = await pool.execute(
+        "UPDATE streamers SET is_active = $2 WHERE channel_id = $1",
+        channel_id,
+        is_active,
+    )
+    return result == "UPDATE 1"
+
+
+async def cleanup_stale_jobs() -> int:
+    pool = get_pool()
+    result = await pool.execute(
+        """
+        UPDATE crawl_jobs
+        SET status      = 'failed',
+            finished_at = NOW(),
+            error_msg   = 'server restarted while job was running'
+        WHERE status = 'running'
+        """
+    )
+    return int(result.split()[-1])
 
 
 async def get_crawl_job(job_id: str) -> dict | None:
     pool = get_pool()
     row = await pool.fetchrow(
         "SELECT * FROM crawl_jobs WHERE id = $1",
-        job_id,
+        uuid.UUID(job_id),
     )
     return dict(row) if row else None
