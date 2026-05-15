@@ -94,3 +94,15 @@ async def list_jobs(limit: int = Query(default=10, ge=1, le=100)):
 @router.get("/jobs/{job_id}")
 async def get_job_status(job_id: str):
     return await crawler.get_job(job_id)
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_failed_channels(job_id: str, background_tasks: BackgroundTasks):
+    job, channel_ids = await crawler.prepare_retry_job(job_id)
+    background_tasks.add_task(
+        crawler.run_bulk_crawl,
+        job["job_id"],
+        channel_ids,
+        _default_since(None),
+    )
+    return {**job, "status": "started"}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -28,6 +28,7 @@ class CrawlJobProgress:
     total: int
     success_count: int = 0
     failed_count: int = 0
+    failed_channels: list[str] = field(default_factory=list)
 
 
 class ChannelCrawlResult:
@@ -82,6 +83,7 @@ async def _sync_job_progress(progress: CrawlJobProgress) -> None:
         total_streamers=progress.total,
         success_count=progress.success_count,
         failed_count=progress.failed_count,
+        failed_channels=progress.failed_channels,
     )
 
 
@@ -105,6 +107,7 @@ async def _crawl_channel_safe(
     except Exception as e:
         logger.error("channel crawl failed channel=%s: %s", channel_id, e)
         progress.failed_count += 1
+        progress.failed_channels.append(channel_id)
     await _sync_job_progress(progress)
 
 
@@ -116,6 +119,7 @@ async def _finish_job(progress: CrawlJobProgress, error_msg: str | None = None) 
         success_count=progress.success_count,
         failed_count=progress.failed_count,
         error_msg=error_msg,
+        failed_channels=progress.failed_channels,
     )
     logger.info(
         "job=%s finished status=%s success=%d failed=%d",
@@ -205,6 +209,7 @@ async def _crawl_videos_safe(
     except Exception as e:
         logger.error("videos crawl failed channel=%s: %s", channel_id, e)
         progress.failed_count += 1
+        progress.failed_channels.append(channel_id)
     await _sync_job_progress(progress)
 
 
@@ -220,6 +225,7 @@ async def _crawl_clips_safe(
     except Exception as e:
         logger.error("clips crawl failed channel=%s: %s", channel_id, e)
         progress.failed_count += 1
+        progress.failed_channels.append(channel_id)
     await _sync_job_progress(progress)
 
 
@@ -267,6 +273,20 @@ async def create_live_job() -> dict[str, object]:
         triggered_by="user",
     )
     return {"job_id": job_id, "total": 0, "status": "running"}
+
+
+async def prepare_retry_job(original_job_id: str) -> tuple[dict[str, object], list[str]]:
+    try:
+        row = await db.get_crawl_job(original_job_id)
+    except ValueError:
+        raise CrawlJobNotFoundException(original_job_id) from None
+    if row is None:
+        raise CrawlJobNotFoundException(original_job_id)
+    failed_channels = row.get("failed_channels") or []
+    if not failed_channels:
+        raise InvalidRequestException("재실행할 실패 채널이 없습니다.")
+    job = await create_job(failed_channels)
+    return job, failed_channels
 
 
 def _serialize_job(row: dict) -> dict[str, object]:

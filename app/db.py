@@ -210,6 +210,7 @@ async def update_crawl_job(
     success_count: int | None = None,
     failed_count: int | None = None,
     error_msg: str | None = None,
+    failed_channels: list[str] | None = None,
 ) -> None:
     job_uuid = uuid.UUID(job_id)
     pool = get_pool()
@@ -224,7 +225,8 @@ async def update_crawl_job(
             total_streamers = COALESCE($3, total_streamers),
             success_count   = COALESCE($4, success_count),
             failed_count    = COALESCE($5, failed_count),
-            error_msg       = COALESCE($6, error_msg)
+            error_msg       = COALESCE($6, error_msg),
+            failed_channels = COALESCE($7::text[], failed_channels)
         WHERE id = $1
         """,
         job_uuid,
@@ -233,6 +235,7 @@ async def update_crawl_job(
         success_count,
         failed_count,
         error_msg,
+        failed_channels,
     )
 
 
@@ -265,7 +268,8 @@ async def get_crawl_jobs(limit: int = 10) -> list[dict]:
     rows = await pool.fetch(
         """
         SELECT id, job_type, started_at, finished_at, status,
-               total_streamers, success_count, failed_count, triggered_by, error_msg
+               total_streamers, success_count, failed_count, triggered_by, error_msg,
+               failed_channels
         FROM crawl_jobs
         ORDER BY started_at DESC
         LIMIT $1
@@ -356,7 +360,13 @@ async def cleanup_stale_jobs() -> int:
 async def get_crawl_job(job_id: str) -> dict | None:
     pool = get_pool()
     row = await pool.fetchrow(
-        "SELECT * FROM crawl_jobs WHERE id = $1",
+        """
+        SELECT id, job_type, started_at, finished_at, status,
+               total_streamers, success_count, failed_count, triggered_by, error_msg,
+               failed_channels
+        FROM crawl_jobs
+        WHERE id = $1
+        """,
         uuid.UUID(job_id),
     )
     return dict(row) if row else None
