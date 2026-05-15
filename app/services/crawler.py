@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Literal
 
 from app import db
+from app.config import settings
 from app.exceptions import (
     CrawlJobConflictException,
     CrawlJobNotFoundException,
@@ -32,8 +33,6 @@ CrawlJobType = Literal[
     "user_retry",
 ]
 TriggeredBy = Literal["scheduler", "user", "admin"]
-DEFAULT_VIDEO_PAGES = 10
-DEFAULT_CLIP_PAGES = 5
 
 
 @dataclass
@@ -65,8 +64,8 @@ async def crawl_channel(
     channel_id: str,
     since: datetime | None = None,
     mode: CrawlMode = "full",
-    max_video_pages: int | None = DEFAULT_VIDEO_PAGES,
-    max_clip_pages: int | None = DEFAULT_CLIP_PAGES,
+    max_video_pages: int | None = settings.default_video_pages,
+    max_clip_pages: int | None = settings.default_clip_pages,
 ) -> ChannelCrawlResult:
     videos: list[Video] = []
     clips: list[Clip] = []
@@ -106,8 +105,8 @@ async def _crawl_channel_safe(
     channel_id: str,
     since: datetime | None = None,
     mode: CrawlMode = "full",
-    max_video_pages: int | None = DEFAULT_VIDEO_PAGES,
-    max_clip_pages: int | None = DEFAULT_CLIP_PAGES,
+    max_video_pages: int | None = settings.default_video_pages,
+    max_clip_pages: int | None = settings.default_clip_pages,
 ) -> None:
     try:
         await crawl_channel(
@@ -149,8 +148,8 @@ async def run_bulk_crawl(
     channel_ids: list[str],
     since: datetime | None = None,
     mode: CrawlMode = "full",
-    max_video_pages: int | None = DEFAULT_VIDEO_PAGES,
-    max_clip_pages: int | None = DEFAULT_CLIP_PAGES,
+    max_video_pages: int | None = settings.default_video_pages,
+    max_clip_pages: int | None = settings.default_clip_pages,
 ) -> None:
     progress = CrawlJobProgress(job_id=job_id, total=len(channel_ids))
     logger.info("bulk crawl started job=%s total=%d mode=%s", job_id, len(channel_ids), mode)
@@ -174,9 +173,6 @@ async def run_bulk_crawl(
         await _finish_job(progress, error_msg=str(e))
 
 
-_MAX_LIVE_PAGES = 200
-
-
 async def run_live_crawl(
     job_id: str,
     min_viewers: int,
@@ -187,7 +183,7 @@ async def run_live_crawl(
     logger.info("live crawl started job=%s min_viewers=%d mode=%s", job_id, min_viewers, mode)
     try:
         cursor: LiveCursor | None = None
-        for page_num in range(_MAX_LIVE_PAGES):
+        for page_num in range(settings.max_live_pages):
             channel_ids, cursor = await chzzk_client.get_live_page(
                 min_viewers=min_viewers,
                 cursor_viewer_count=cursor["viewer_count"] if cursor else None,

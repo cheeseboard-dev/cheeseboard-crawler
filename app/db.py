@@ -248,30 +248,6 @@ async def update_crawl_job(
     )
 
 
-async def create_crawl_job(job_type: str, total_streamers: int, triggered_by: str) -> str:
-    return await insert_crawl_job(
-        job_type,
-        total_streamers=total_streamers,
-        triggered_by=triggered_by,
-    )
-
-
-async def finish_crawl_job(
-    job_id: str,
-    *,
-    success: int,
-    failed: int,
-    error_msg: str | None = None,
-) -> None:
-    await update_crawl_job(
-        job_id,
-        status="failed" if error_msg else "done",
-        success_count=success,
-        failed_count=failed,
-        error_msg=error_msg,
-    )
-
-
 async def get_crawl_jobs(limit: int = 10) -> list[dict]:
     pool = get_pool()
     rows = await pool.fetch(

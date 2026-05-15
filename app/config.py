@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     max_concurrent_requests: int = 3
     retry_count: int = 3
 
+    default_video_pages: int = 10
+    default_clip_pages: int = 5
+    max_live_pages: int = 200
+
     streamers_csv_path: str = "data/streamers.csv"
     output_dir: str = "output"
 

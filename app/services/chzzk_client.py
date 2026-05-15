@@ -17,9 +17,6 @@ from app.models.video import Video
 
 logger = logging.getLogger(__name__)
 
-_MAX_VIDEO_PAGES = 10
-_MAX_CLIP_PAGES = 5
-
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
@@ -127,7 +124,7 @@ class ChzzkClient:
         since: datetime | None = None,
         size: int = 30,
         sort_type: str = "LATEST",
-        max_pages: int | None = _MAX_VIDEO_PAGES,
+        max_pages: int | None = settings.default_video_pages,
     ) -> list[Video]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/videos"
         since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
@@ -204,7 +201,7 @@ class ChzzkClient:
         since: datetime | None = None,
         size: int = 50,
         sort_type: str = "LATEST",
-        max_pages: int | None = _MAX_CLIP_PAGES,
+        max_pages: int | None = settings.default_clip_pages,
     ) -> list[Clip]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/clips"
         since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None

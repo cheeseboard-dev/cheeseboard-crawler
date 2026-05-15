@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -33,6 +34,7 @@ async def _run_scheduled_crawl(job_type: crawler.CrawlJobType) -> None:
         await crawler.run_bulk_crawl(
             job_id,
             channel_ids,
+            since=datetime.now() - timedelta(hours=3),
             max_video_pages=3,
             max_clip_pages=3,
         )
@@ -40,6 +42,7 @@ async def _run_scheduled_crawl(job_type: crawler.CrawlJobType) -> None:
         await crawler.run_bulk_crawl(
             job_id,
             channel_ids,
+            since=None,
             max_video_pages=None,
             max_clip_pages=None,
         )
