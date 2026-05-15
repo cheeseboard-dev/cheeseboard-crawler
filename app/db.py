@@ -202,6 +202,15 @@ async def insert_crawl_job(
     return str(row["id"])
 
 
+async def has_running_job_of_type(job_type: str) -> bool:
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT 1 FROM crawl_jobs WHERE job_type = $1 AND status = 'running' LIMIT 1",
+        job_type,
+    )
+    return row is not None
+
+
 async def update_crawl_job(
     job_id: str,
     *,

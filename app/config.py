@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "CheeseBoard Crawler"
     port: int = 8000
     debug: bool = False
+    api_key_hash: str = ""
 
     chzzk_base_url: str = "https://api.chzzk.naver.com/service/v1"
     request_timeout: float = 10.0

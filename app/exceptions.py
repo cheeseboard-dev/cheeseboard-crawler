@@ -41,3 +41,13 @@ class ChzzkAPIException(CheeseBoardException):
 class InvalidRequestException(CheeseBoardException):
     def __init__(self, message: str):
         super().__init__("INVALID_REQUEST", message, 400)
+
+
+class CrawlJobConflictException(CheeseBoardException):
+    def __init__(self, job_type: str):
+        super().__init__("CRAWL_JOB_CONFLICT", f"이미 진행 중인 잡이 있습니다: {job_type}.", 409)
+
+
+class InvalidApiKeyException(CheeseBoardException):
+    def __init__(self):
+        super().__init__("INVALID_API_KEY", "유효하지 않은 API 키입니다.", 401)

@@ -13,6 +13,10 @@ _scheduler: AsyncIOScheduler | None = None
 
 
 async def _run_scheduled_crawl(job_type: crawler.CrawlJobType) -> None:
+    if await db.has_running_job_of_type(job_type):
+        logger.warning("scheduled %s crawl skipped: job already running", job_type)
+        return
+
     channel_ids = await db.get_active_channel_ids()
     job_id = await db.insert_crawl_job(
         job_type,

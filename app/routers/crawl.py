@@ -30,7 +30,7 @@ async def crawl_single_channel(
 
 @router.post("/bulk")
 async def crawl_bulk(request: ChannelListRequest, background_tasks: BackgroundTasks):
-    job = await crawler.create_job(request.channel_ids)
+    job = await crawler.create_job(request.channel_ids, job_type="user_bulk")
     background_tasks.add_task(
         crawler.run_bulk_crawl,
         job["job_id"],
@@ -51,7 +51,7 @@ async def crawl_live(
     mode: CrawlMode = Query(default="full", description="full | streamers_only"),
 ):
     effective_since = None if mode == "streamers_only" else _default_since(since)
-    job = await crawler.create_live_job()
+    job = await crawler.create_live_job(job_type="user_live")
     background_tasks.add_task(
         crawler.run_live_crawl,
         job["job_id"],
@@ -64,7 +64,7 @@ async def crawl_live(
 
 @router.post("/videos")
 async def crawl_videos(request: ChannelListRequest, background_tasks: BackgroundTasks):
-    job = await crawler.create_job(request.channel_ids)
+    job = await crawler.create_job(request.channel_ids, job_type="user_videos")
     background_tasks.add_task(
         crawler.run_videos_crawl,
         job["job_id"],
@@ -76,7 +76,7 @@ async def crawl_videos(request: ChannelListRequest, background_tasks: Background
 
 @router.post("/clips")
 async def crawl_clips(request: ChannelListRequest, background_tasks: BackgroundTasks):
-    job = await crawler.create_job(request.channel_ids)
+    job = await crawler.create_job(request.channel_ids, job_type="user_clips")
     background_tasks.add_task(
         crawler.run_clips_crawl,
         job["job_id"],

@@ -7,7 +7,11 @@ from datetime import datetime
 from typing import Literal
 
 from app import db
-from app.exceptions import CrawlJobNotFoundException, InvalidRequestException
+from app.exceptions import (
+    CrawlJobConflictException,
+    CrawlJobNotFoundException,
+    InvalidRequestException,
+)
 from app.models.channel import ChannelInfo
 from app.models.clip import Clip
 from app.models.video import Video
@@ -16,7 +20,17 @@ from app.services.chzzk_client import LiveCursor, chzzk_client
 logger = logging.getLogger(__name__)
 
 CrawlMode = Literal["full", "streamers_only"]
-CrawlJobType = Literal["initial", "incremental", "full", "user_triggered"]
+CrawlJobType = Literal[
+    "initial",
+    "incremental",
+    "full",
+    "user_triggered",
+    "user_bulk",
+    "user_videos",
+    "user_clips",
+    "user_live",
+    "user_retry",
+]
 TriggeredBy = Literal["scheduler", "user", "admin"]
 DEFAULT_VIDEO_PAGES = 10
 DEFAULT_CLIP_PAGES = 5
@@ -258,6 +272,8 @@ async def create_job(
 ) -> dict[str, object]:
     if not channel_ids:
         raise InvalidRequestException("channel_ids must not be empty.")
+    if await db.has_running_job_of_type(job_type):
+        raise CrawlJobConflictException(job_type)
     job_id = await db.insert_crawl_job(
         job_type,
         total_streamers=len(channel_ids),
@@ -266,9 +282,11 @@ async def create_job(
     return {"job_id": job_id, "total": len(channel_ids), "status": "running"}
 
 
-async def create_live_job() -> dict[str, object]:
+async def create_live_job(job_type: CrawlJobType = "user_triggered") -> dict[str, object]:
+    if await db.has_running_job_of_type(job_type):
+        raise CrawlJobConflictException(job_type)
     job_id = await db.insert_crawl_job(
-        "user_triggered",
+        job_type,
         total_streamers=0,
         triggered_by="user",
     )
@@ -285,7 +303,7 @@ async def prepare_retry_job(original_job_id: str) -> tuple[dict[str, object], li
     failed_channels = row.get("failed_channels") or []
     if not failed_channels:
         raise InvalidRequestException("재실행할 실패 채널이 없습니다.")
-    job = await create_job(failed_channels)
+    job = await create_job(failed_channels, job_type="user_retry")
     return job, failed_channels
 
 

@@ -1,9 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from app import db
+from app.auth import require_api_key
 from app.config import settings
 from app.exception_handlers import cheeseboard_exception_handler, unhandled_exception_handler
 from app.exceptions import CheeseBoardException
@@ -45,10 +46,10 @@ app = FastAPI(
 app.add_exception_handler(CheeseBoardException, cheeseboard_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
-app.include_router(channels.router, prefix="/api/v1")
-app.include_router(content.router, prefix="/api/v1")
-app.include_router(crawl.router, prefix="/api/v1")
-app.include_router(streamers.router, prefix="/api/v1")
+app.include_router(channels.router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
+app.include_router(content.router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
+app.include_router(crawl.router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
+app.include_router(streamers.router, prefix="/api/v1", dependencies=[Depends(require_api_key)])
 
 
 @app.get("/")
