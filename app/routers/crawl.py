@@ -3,7 +3,9 @@ from datetime import datetime
 from fastapi import APIRouter, BackgroundTasks, Query
 from pydantic import BaseModel
 
+from app import db
 from app.config import settings
+from app.exceptions import InvalidRequestException
 from app.schemas import CrawlChannelResponse, ErrorResponse, JobResponse, JobStartedResponse
 from app.services import crawler
 from app.services.crawler import CrawlJobType, CrawlMode, CrawlScope
@@ -187,6 +189,32 @@ async def retry_failed_channels(job_id: str, background_tasks: BackgroundTasks):
         channel_ids,
         scope=CrawlScope.FULL,
         since=None,
+    )
+    return {**job, "status": "started"}
+
+
+@router.post(
+    "/pending",
+    response_model=JobStartedResponse,
+    status_code=202,
+    summary="미크롤 스트리머 전체 크롤",
+    responses=_ERR_409,
+)
+async def crawl_pending(background_tasks: BackgroundTasks):
+    """
+    `is_initial_crawled=False`인 활성 스트리머를 모아 FULL 크롤 잡을 생성합니다.
+
+    처리 대상이 없으면 400을 반환합니다.
+    """
+    channel_ids = await db.get_uncrawled_channel_ids()
+    if not channel_ids:
+        raise InvalidRequestException("초기 크롤이 필요한 스트리머가 없습니다.")
+    job = await crawler.create_job(channel_ids, job_type="initial", triggered_by="user")
+    background_tasks.add_task(
+        crawler.run_crawl,
+        job["job_id"],
+        channel_ids,
+        CrawlScope.FULL,
     )
     return {**job, "status": "started"}
 

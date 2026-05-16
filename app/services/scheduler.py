@@ -120,6 +120,11 @@ async def run_channel_clips_incremental_job() -> None:
         min_read_count=100,
     )
 
+    uncrawled = await db.get_uncrawled_channel_ids()
+    if uncrawled:
+        logger.info("uncrawled streamers found, scheduling initial crawl count=%d", len(uncrawled))
+        asyncio.create_task(_crawl_new_streamers(uncrawled))
+
 
 async def run_weekly_reconciliation() -> None:
     if await db.has_running_job_of_type("full"):
