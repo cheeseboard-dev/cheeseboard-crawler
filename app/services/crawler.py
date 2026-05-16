@@ -191,18 +191,6 @@ async def run_crawl(
         await _finish_job(progress, error_msg=str(e))
 
 
-async def run_bulk_crawl(
-    job_id: str,
-    channel_ids: list[str],
-    since: datetime | None = None,
-    mode: CrawlMode = "full",
-    max_video_pages: int | None = settings.default_video_pages,
-    max_clip_pages: int | None = settings.default_clip_pages,
-) -> None:
-    scope = CrawlScope.STREAMERS_ONLY if mode == "streamers_only" else CrawlScope.FULL
-    await run_crawl(job_id, channel_ids, scope, since, max_video_pages, max_clip_pages)
-
-
 async def run_live_crawl(
     job_id: str,
     min_viewers: int,
@@ -247,24 +235,6 @@ async def run_live_crawl(
     except Exception as e:
         logger.exception("live crawl failed job=%s", job_id)
         await _finish_job(progress, error_msg=str(e))
-
-
-async def run_videos_crawl(
-    job_id: str,
-    channel_ids: list[str],
-    since: datetime | None,
-    max_pages: int | None = settings.default_video_pages,
-) -> None:
-    await run_crawl(job_id, channel_ids, CrawlScope.VIDEOS, since, max_video_pages=max_pages)
-
-
-async def run_clips_crawl(
-    job_id: str,
-    channel_ids: list[str],
-    since: datetime | None,
-    max_pages: int | None = settings.default_clip_pages,
-) -> None:
-    await run_crawl(job_id, channel_ids, CrawlScope.CLIPS, since, max_clip_pages=max_pages)
 
 
 async def create_job(

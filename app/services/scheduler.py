@@ -31,17 +31,19 @@ async def _run_scheduled_crawl(job_type: crawler.CrawlJobType) -> None:
         return
 
     if job_type == "incremental":
-        await crawler.run_bulk_crawl(
+        await crawler.run_crawl(
             job_id,
             channel_ids,
+            scope=crawler.CrawlScope.FULL,
             since=datetime.now() - timedelta(hours=3),
             max_video_pages=3,
             max_clip_pages=3,
         )
     else:
-        await crawler.run_bulk_crawl(
+        await crawler.run_crawl(
             job_id,
             channel_ids,
+            scope=crawler.CrawlScope.FULL,
             since=None,
             max_video_pages=None,
             max_clip_pages=None,

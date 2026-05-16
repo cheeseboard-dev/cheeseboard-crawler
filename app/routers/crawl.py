@@ -114,9 +114,10 @@ async def get_job_status(job_id: str):
 async def retry_failed_channels(job_id: str, background_tasks: BackgroundTasks):
     job, channel_ids = await crawler.prepare_retry_job(job_id)
     background_tasks.add_task(
-        crawler.run_bulk_crawl,
+        crawler.run_crawl,
         job["job_id"],
         channel_ids,
-        None,
+        scope=CrawlScope.FULL,
+        since=None,
     )
     return {**job, "status": "started"}
