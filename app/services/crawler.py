@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -105,6 +106,56 @@ async def crawl_channel(
     return ChannelCrawlResult(channel=channel, videos=videos, clips=clips)
 
 
+async def upsert_stub_streamer_if_missing(channel: ChannelResponse) -> bool:
+    if await db.streamer_exists(channel.channel_id):
+        return False
+    await db.upsert_streamer(channel)
+    return True
+
+
+async def ingest_home_clips(
+    entries: list[tuple[clip_models.ClipResponse, ChannelResponse]],
+    min_read_count: int = 100,
+) -> dict[str, int]:
+    channels_seen = {channel.channel_id for _, channel in entries}
+    channels_new = 0
+    grouped: defaultdict[str, list[clip_models.ClipResponse]] = defaultdict(list)
+    for clip, channel in entries:
+        if await upsert_stub_streamer_if_missing(channel):
+            channels_new += 1
+        if clip.read_count < min_read_count:
+            continue
+        grouped[channel.channel_id].append(clip)
+    clips_upserted = 0
+    for channel_id, clips in grouped.items():
+        clips_upserted += await db.upsert_clips(channel_id, clips)
+    return {
+        "channels_seen": len(channels_seen),
+        "channels_new": channels_new,
+        "clips_upserted": clips_upserted,
+    }
+
+
+async def ingest_home_videos(
+    entries: list[tuple[video_models.VideoResponse, ChannelResponse]],
+) -> dict[str, int]:
+    channels_seen = {channel.channel_id for _, channel in entries}
+    channels_new = 0
+    grouped: defaultdict[str, list[video_models.VideoResponse]] = defaultdict(list)
+    for video, channel in entries:
+        if await upsert_stub_streamer_if_missing(channel):
+            channels_new += 1
+        grouped[channel.channel_id].append(video)
+    videos_upserted = 0
+    for channel_id, videos in grouped.items():
+        videos_upserted += await db.upsert_videos(channel_id, videos)
+    return {
+        "channels_seen": len(channels_seen),
+        "channels_new": channels_new,
+        "videos_upserted": videos_upserted,
+    }
+
+
 async def _sync_job_progress(progress: CrawlJobProgress) -> None:
     await db.update_crawl_job(
         progress.job_id,
@@ -145,6 +196,25 @@ async def _crawl_one_safe(
         progress.success_count += 1
     except Exception as e:
         logger.error("crawl failed channel=%s scope=%s: %s", channel_id, scope.value, e)
+        progress.failed_count += 1
+        progress.failed_channels.append(channel_id)
+    await _sync_job_progress(progress)
+
+
+async def _crawl_one_clips_watermark(
+    progress: CrawlJobProgress,
+    channel_id: str,
+    max_pages: int,
+    min_read_count: int,
+) -> None:
+    try:
+        last_seen = await db.get_channel_clip_watermark(channel_id)
+        clips = await chzzk_client.get_clips(channel_id, since=last_seen, max_pages=max_pages)
+        clips = [c for c in clips if c.read_count >= min_read_count]
+        await db.upsert_clips(channel_id, clips)
+        progress.success_count += 1
+    except Exception as e:
+        logger.error("crawl failed channel=%s scope=%s: %s", channel_id, CrawlScope.CLIPS.value, e)
         progress.failed_count += 1
         progress.failed_channels.append(channel_id)
     await _sync_job_progress(progress)
@@ -203,6 +273,32 @@ async def run_crawl(
         await asyncio.gather(
             *[
                 _crawl_one_safe(progress, cid, scope, since, max_video_pages, max_clip_pages)
+                for cid in channel_ids
+            ]
+        )
+        await _finish_job(progress)
+    except Exception as e:
+        logger.exception("crawl failed job=%s", job_id)
+        await _finish_job(progress, error_msg=str(e))
+
+
+async def run_channel_clips_incremental(
+    job_id: str,
+    channel_ids: list[str],
+    max_pages: int,
+    min_read_count: int,
+) -> None:
+    progress = CrawlJobProgress(job_id=job_id, total=len(channel_ids))
+    logger.info(
+        "crawl started job=%s total=%d scope=%s",
+        job_id,
+        len(channel_ids),
+        CrawlScope.CLIPS.value,
+    )
+    try:
+        await asyncio.gather(
+            *[
+                _crawl_one_clips_watermark(progress, cid, max_pages, min_read_count)
                 for cid in channel_ids
             ]
         )

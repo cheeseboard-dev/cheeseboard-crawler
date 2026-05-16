@@ -42,6 +42,24 @@ async def streamer_exists(channel_id: str) -> bool:
         return result.scalar_one_or_none() is not None
 
 
+async def get_channel_video_watermark(channel_id: str) -> datetime | None:
+    async with orm_session.get_session() as session:
+        result = await session.execute(
+            select(func.max(Video.published_at)).where(Video.channel_id == channel_id)
+        )
+        row: datetime | None = result.scalar_one_or_none()
+        return row
+
+
+async def get_channel_clip_watermark(channel_id: str) -> datetime | None:
+    async with orm_session.get_session() as session:
+        result = await session.execute(
+            select(func.max(Clip.created_at)).where(Clip.channel_id == channel_id)
+        )
+        row: datetime | None = result.scalar_one_or_none()
+        return row
+
+
 async def upsert_streamer(channel: ChannelResponse) -> None:
     values = {
         "channel_id": channel.channel_id,
