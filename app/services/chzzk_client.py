@@ -9,11 +9,11 @@ from typing import Any, TypedDict
 import certifi
 import httpx
 
+import app.models.clip as clip_models
+import app.models.video as video_models
 from app.config import settings
 from app.exceptions import ChannelNotFoundException, ChzzkAPIException
-from app.models.channel import ChannelInfo
-from app.models.clip import Clip
-from app.models.video import Video
+from app.models.channel import ChannelResponse
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +104,13 @@ class ChzzkClient:
                 f"CHZZK API 요청 실패 (재시도 {settings.retry_count}회 초과): {url}"
             )
 
-    async def get_channel(self, channel_id: str) -> ChannelInfo:
+    async def get_channel(self, channel_id: str) -> ChannelResponse:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}"
         data = await self._fetch(url)
         c = (data or {}).get("content", {})
         if not c.get("channelId"):
             raise ChannelNotFoundException(channel_id)
-        return ChannelInfo(
+        return ChannelResponse(
             channel_id=c["channelId"],
             channel_name=c["channelName"],
             profile_image_url=c.get("channelImageUrl"),
@@ -125,12 +125,12 @@ class ChzzkClient:
         size: int = 30,
         sort_type: str = "LATEST",
         max_pages: int | None = settings.default_video_pages,
-    ) -> list[Video]:
+    ) -> list[video_models.VideoResponse]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/videos"
         since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
-        result: list[Video] = []
-
+        result: list[video_models.VideoResponse] = []
         page = 0
+
         while max_pages is None or page < max_pages:
             data = await self._fetch(url, {"size": size, "sortType": sort_type, "page": page})
             if not data:
@@ -138,7 +138,6 @@ class ChzzkClient:
             items = data.get("content", {}).get("data", [])
             if not items:
                 break
-
             cutoff_hit = False
             for v in items:
                 try:
@@ -148,7 +147,7 @@ class ChzzkClient:
                         cutoff_hit = True
                         break
                     result.append(
-                        Video(
+                        video_models.VideoResponse(
                             video_no=v["videoNo"],
                             video_id=v.get("videoId"),
                             title=v["videoTitle"],
@@ -162,15 +161,14 @@ class ChzzkClient:
                         )
                     )
                 except Exception as e:
-                    logger.warning("video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e)
-
+                    logger.warning("video parse failed (video_no=%s): %s", v.get("videoNo"), e)
             if cutoff_hit or len(items) < size:
                 break
             page += 1
 
         return result
 
-    async def get_video(self, video_no: int) -> tuple[str, Video] | None:
+    async def get_video(self, video_no: int) -> tuple[str, video_models.VideoResponse] | None:
         url = f"{settings.chzzk_base_url}/videos/{video_no}"
         data = await self._fetch(url)
         content = (data or {}).get("content")
@@ -181,7 +179,7 @@ class ChzzkClient:
             return None
         date_key = "publishDateAt" if "publishDateAt" in content else "publishDate"
         published_str = self._parse_date(content.get(date_key))
-        video = Video(
+        video = video_models.VideoResponse(
             video_no=content["videoNo"],
             video_id=content.get("videoId"),
             title=content["videoTitle"],
@@ -202,25 +200,23 @@ class ChzzkClient:
         size: int = 50,
         sort_type: str = "LATEST",
         max_pages: int | None = settings.default_clip_pages,
-    ) -> list[Clip]:
+    ) -> list[clip_models.ClipResponse]:
         url = f"{settings.chzzk_base_url}/channels/{channel_id}/clips"
         since_str = since.strftime("%Y-%m-%d %H:%M:%S") if since else None
-        result: list[Clip] = []
+        result: list[clip_models.ClipResponse] = []
         cursor: str | None = None
-
         page = 0
+
         while max_pages is None or page < max_pages:
             params: dict[str, Any] = {"size": size, "sortType": sort_type}
             if cursor:
                 params["clipUID"] = cursor
-
             data = await self._fetch(url, params)
             if not data:
                 break
             items = data.get("content", {}).get("data", [])
             if not items:
                 break
-
             cutoff_hit = False
             for c in items:
                 try:
@@ -229,7 +225,7 @@ class ChzzkClient:
                         cutoff_hit = True
                         break
                     result.append(
-                        Clip(
+                        clip_models.ClipResponse(
                             clip_uid=c["clipUID"],
                             title=c["clipTitle"],
                             created_at=created_str,
@@ -241,8 +237,7 @@ class ChzzkClient:
                         )
                     )
                 except Exception as e:
-                    logger.warning("clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e)
-
+                    logger.warning("clip parse failed (clip_uid=%s): %s", c.get("clipUID"), e)
             if cutoff_hit or len(items) < size:
                 break
             cursor = items[-1]["clipUID"]
@@ -250,7 +245,7 @@ class ChzzkClient:
 
         return result
 
-    async def get_clip(self, clip_uid: str) -> tuple[str, Clip] | None:
+    async def get_clip(self, clip_uid: str) -> tuple[str, clip_models.ClipResponse] | None:
         url = f"{settings.chzzk_base_url}/clips/{clip_uid}"
         data = await self._fetch(url)
         content = (data or {}).get("content")
@@ -260,7 +255,7 @@ class ChzzkClient:
         if not channel_id:
             return None
         created_str = self._parse_date(content.get("createdDate"))
-        clip = Clip(
+        clip = clip_models.ClipResponse(
             clip_uid=content["clipUID"],
             title=content["clipTitle"],
             created_at=created_str,
@@ -279,7 +274,6 @@ class ChzzkClient:
         cursor_viewer_count: int | None = None,
         cursor_live_id: int | None = None,
     ) -> tuple[list[str], LiveCursor | None]:
-        """라이브 채널 1페이지를 fetch해 channel_id 목록과 다음 커서를 반환."""
         url = f"{settings.chzzk_base_url}/lives"
         params: dict[str, Any] = {"size": size, "sortType": "POPULAR"}
         if cursor_viewer_count is not None and cursor_live_id is not None:
@@ -295,7 +289,7 @@ class ChzzkClient:
         last_item: dict[str, Any] | None = None
         for item in items:
             if item.get("concurrentUserCount", 0) < min_viewers:
-                logger.debug("시청자 기준 미달 — 페이지 종료 (기준: %d명)", min_viewers)
+                logger.debug("live page stopped below viewer threshold: %d", min_viewers)
                 return channel_ids, None
             channel_id = (item.get("channel") or {}).get("channelId")
             if channel_id:

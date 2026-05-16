@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
-class ChannelInfo(BaseModel):
+class ChannelResponse(BaseModel):
     channel_id: str
     channel_name: str
     profile_image_url: str | None = None

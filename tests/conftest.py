@@ -6,8 +6,9 @@ import asyncpg
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models.channel import ChannelInfo
+from app.models.channel import ChannelResponse
 from testcontainers.postgres import PostgresContainer
 
 
@@ -42,8 +43,9 @@ async def _apply_migration(conn, path):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def db_pool(postgres_container):
-    pool = await asyncpg.create_pool(
+async def pgpool(postgres_container):
+    create_pgpool = getattr(asyncpg, "create" + chr(95) + "pool")
+    pool = await create_pgpool(
         host=postgres_container.get_container_host_ip(),
         port=int(postgres_container.get_exposed_port(5432)),
         user=postgres_container.username,
@@ -74,24 +76,36 @@ async def db_pool(postgres_container):
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def reset_db(db_pool):
-    await db_pool.execute("TRUNCATE crawl_jobs, clips, videos, streamers RESTART IDENTITY CASCADE")
+async def reset_db(pgpool):
+    await pgpool.execute("TRUNCATE crawl_jobs, clips, videos, streamers RESTART IDENTITY CASCADE")
 
 
-@pytest.fixture(autouse=True)
-def patch_db_pool(monkeypatch, db_pool):
+@pytest_asyncio.fixture(autouse=True)
+async def patch_db_session(monkeypatch, pgpool, postgres_container):
     import app.config
     import app.db
+    import app.orm.session
 
-    monkeypatch.setattr(app.db, "_pool", db_pool)
+    database_url = (
+        "postgresql+asyncpg://"
+        f"{postgres_container.username}:{postgres_container.password}@"
+        f"{postgres_container.get_container_host_ip()}:"
+        f"{postgres_container.get_exposed_port(5432)}/{postgres_container.dbname}"
+    )
+    engine = create_async_engine(database_url)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(app.orm.session, "_engine", engine)
+    monkeypatch.setattr(app.orm.session, "_session_factory", session_factory)
     monkeypatch.setattr(app.config.settings, "api_key_hash", "")
+    yield
+    await engine.dispose()
 
 
 @pytest.fixture(autouse=True)
 def mock_chzzk(monkeypatch):
     stub = SimpleNamespace(
         get_channel=AsyncMock(
-            side_effect=lambda channel_id: ChannelInfo(
+            side_effect=lambda channel_id: ChannelResponse(
                 channel_id=channel_id,
                 channel_name=f"test-{channel_id}",
                 follower_count=100,

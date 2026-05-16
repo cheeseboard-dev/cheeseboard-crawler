@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
-class Clip(BaseModel):
+class ClipResponse(BaseModel):
     clip_uid: str
     title: str
     created_at: str | None = None

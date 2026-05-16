@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
-class Video(BaseModel):
+class VideoResponse(BaseModel):
     video_no: int
     video_id: str | None = None
     title: str

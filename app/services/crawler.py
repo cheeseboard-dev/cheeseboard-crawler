@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
+import app.models.clip as clip_models
+import app.models.video as video_models
 from app import db
 from app.config import settings
 from app.exceptions import (
@@ -13,9 +15,7 @@ from app.exceptions import (
     CrawlJobNotFoundException,
     InvalidRequestException,
 )
-from app.models.channel import ChannelInfo
-from app.models.clip import Clip
-from app.models.video import Video
+from app.models.channel import ChannelResponse
 from app.services.chzzk_client import LiveCursor, chzzk_client
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,12 @@ class CrawlJobProgress:
 
 
 class ChannelCrawlResult:
-    def __init__(self, channel: ChannelInfo, videos: list[Video], clips: list[Clip]) -> None:
+    def __init__(
+        self,
+        channel: ChannelResponse,
+        videos: list[video_models.VideoResponse],
+        clips: list[clip_models.ClipResponse],
+    ) -> None:
         self.channel = channel
         self.videos = videos
         self.clips = clips
@@ -67,8 +72,8 @@ async def crawl_channel(
     max_video_pages: int | None = settings.default_video_pages,
     max_clip_pages: int | None = settings.default_clip_pages,
 ) -> ChannelCrawlResult:
-    videos: list[Video] = []
-    clips: list[Clip] = []
+    videos: list[video_models.VideoResponse] = []
+    clips: list[clip_models.ClipResponse] = []
 
     if mode == "streamers_only":
         channel = await chzzk_client.get_channel(channel_id)
