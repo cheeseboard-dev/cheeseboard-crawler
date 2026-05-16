@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -7,10 +8,20 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app import db
 from app.services import crawler
 from app.services.chzzk_client import chzzk_client
+from app.services.crawler import CrawlScope
 
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+
+
+async def _crawl_new_streamers(channel_ids: list[str]) -> None:
+    """홈 피드에서 새로 발견된 스트리머의 전체 컨텐츠를 크롤합니다."""
+    logger.info("new streamers discovered, starting initial crawl count=%d", len(channel_ids))
+    job_id = await db.insert_crawl_job(
+        "initial", total_streamers=len(channel_ids), triggered_by="scheduler"
+    )
+    await crawler.run_crawl(job_id, channel_ids, scope=CrawlScope.FULL)
 
 
 async def run_hot_clips_poll(triggered_by: str = "scheduler") -> None:
@@ -39,6 +50,9 @@ async def run_hot_clips_poll(triggered_by: str = "scheduler") -> None:
             success_count=stats.get("clips_upserted", 0),
         )
         logger.info("hot_clips_poll done %s", stats)
+        new_ids = stats.get("new_channel_ids") or []
+        if new_ids:
+            asyncio.create_task(_crawl_new_streamers(list(new_ids)))
     except Exception as e:
         logger.exception("hot_clips_poll failed")
         await db.update_crawl_job(job_id, status="failed", error_msg=str(e))
@@ -75,6 +89,9 @@ async def run_latest_videos_poll(triggered_by: str = "scheduler") -> None:
             success_count=stats.get("videos_upserted", 0),
         )
         logger.info("latest_videos_poll done %s", stats)
+        new_ids = stats.get("new_channel_ids") or []
+        if new_ids:
+            asyncio.create_task(_crawl_new_streamers(list(new_ids)))
     except Exception as e:
         logger.exception("latest_videos_poll failed")
         await db.update_crawl_job(job_id, status="failed", error_msg=str(e))

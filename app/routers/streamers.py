@@ -194,6 +194,6 @@ async def import_streamers_csv(file: UploadFile, background_tasks: BackgroundTas
         crawler.run_crawl,
         job["job_id"],
         channel_ids,
-        CrawlScope.STREAMERS_ONLY,
+        CrawlScope.FULL,
     )
     return {**job, "status": "started"}

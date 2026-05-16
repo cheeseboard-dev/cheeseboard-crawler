@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, TypedDict
 
 import app.models.clip as clip_models
 import app.models.video as video_models
@@ -28,6 +28,20 @@ class CrawlScope(StrEnum):
     VIDEOS = "videos"
     CLIPS = "clips"
     STREAMERS_ONLY = "streamers_only"
+
+
+class ClipIngestStats(TypedDict):
+    channels_seen: int
+    channels_new: int
+    new_channel_ids: list[str]
+    clips_upserted: int
+
+
+class VideoIngestStats(TypedDict):
+    channels_seen: int
+    channels_new: int
+    new_channel_ids: list[str]
+    videos_upserted: int
 
 
 logger = logging.getLogger(__name__)
@@ -119,14 +133,14 @@ async def upsert_stub_streamer_if_missing(channel: ChannelResponse) -> bool:
 async def ingest_home_clips(
     entries: list[tuple[clip_models.ClipResponse, ChannelResponse]],
     min_read_count: int = 100,
-) -> dict[str, int]:
+) -> ClipIngestStats:
     channels_by_id: dict[str, ChannelResponse] = {}
-    channels_new = 0
+    new_channel_ids: list[str] = []
     grouped: defaultdict[str, list[clip_models.ClipResponse]] = defaultdict(list)
     for clip, channel in entries:
         channels_by_id[channel.channel_id] = channel
         if await upsert_stub_streamer_if_missing(channel):
-            channels_new += 1
+            new_channel_ids.append(channel.channel_id)
         if clip.read_count < min_read_count:
             continue
         grouped[channel.channel_id].append(clip)
@@ -137,21 +151,22 @@ async def ingest_home_clips(
         await es_client.bulk_index_clips(ch.channel_name, channel_id, clips)
     return {
         "channels_seen": len(channels_by_id),
-        "channels_new": channels_new,
+        "channels_new": len(new_channel_ids),
+        "new_channel_ids": new_channel_ids,
         "clips_upserted": clips_upserted,
     }
 
 
 async def ingest_home_videos(
     entries: list[tuple[video_models.VideoResponse, ChannelResponse]],
-) -> dict[str, int]:
+) -> VideoIngestStats:
     channels_by_id: dict[str, ChannelResponse] = {}
-    channels_new = 0
+    new_channel_ids: list[str] = []
     grouped: defaultdict[str, list[video_models.VideoResponse]] = defaultdict(list)
     for video, channel in entries:
         channels_by_id[channel.channel_id] = channel
         if await upsert_stub_streamer_if_missing(channel):
-            channels_new += 1
+            new_channel_ids.append(channel.channel_id)
         grouped[channel.channel_id].append(video)
     videos_upserted = 0
     for channel_id, videos in grouped.items():
@@ -160,7 +175,8 @@ async def ingest_home_videos(
         await es_client.bulk_index_videos(ch.channel_name, channel_id, videos)
     return {
         "channels_seen": len(channels_by_id),
-        "channels_new": channels_new,
+        "channels_new": len(new_channel_ids),
+        "new_channel_ids": new_channel_ids,
         "videos_upserted": videos_upserted,
     }
 

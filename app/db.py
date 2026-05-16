@@ -140,20 +140,22 @@ async def upsert_clips(channel_id: str, clips: list[clip_models.ClipResponse]) -
                 select(Video.video_id).where(Video.video_id.in_(candidate_ids))
             )
             known_video_ids = set(rows_v.scalars().all())
-        dropped = sum(
+        nullified = sum(
             1 for c in clips if c.origin_video_id and c.origin_video_id not in known_video_ids
         )
-        if dropped:
+        if nullified:
             logger.debug(
-                "upsert_clips: skipped %d clip(s) with unresolved origin_video_id channel=%s",
-                dropped,
+                "upsert_clips: %d clip(s) with unresolved origin_video_id stored without link channel=%s",
+                nullified,
                 channel_id,
             )
         rows = [
             {
                 "clip_uid": c.clip_uid,
                 "channel_id": channel_id,
-                "origin_video_id": c.origin_video_id,
+                "origin_video_id": c.origin_video_id
+                if c.origin_video_id in known_video_ids
+                else None,
                 "title": c.title,
                 "read_count": c.read_count,
                 "duration": c.duration,
@@ -162,7 +164,6 @@ async def upsert_clips(channel_id: str, clips: list[clip_models.ClipResponse]) -
                 "last_refreshed_at": func.now(),
             }
             for c in clips
-            if c.origin_video_id is None or c.origin_video_id in known_video_ids
         ]
         if not rows:
             return 0
