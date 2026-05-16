@@ -11,6 +11,7 @@ from app.exceptions import CheeseBoardException
 from app.log_config import setup_logging
 from app.routers import channels, content, crawl, streamers
 from app.services.chzzk_client import chzzk_client
+from app.services.es_client import es_client
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 setup_logging()
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
         cleaned = await db.cleanup_stale_jobs()
         if cleaned:
             logging.getLogger(__name__).warning("stale running jobs cleaned up: %d", cleaned)
+        await es_client.start()
         start_scheduler()
         scheduler_started = True
     except Exception as e:
@@ -33,6 +35,7 @@ async def lifespan(app: FastAPI):
     yield
     if scheduler_started:
         stop_scheduler()
+    await es_client.stop()
     await chzzk_client.stop()
     await db.close_pool()
 

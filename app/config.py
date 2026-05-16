@@ -26,5 +26,8 @@ class Settings(BaseSettings):
     # PostgreSQL
     database_url: str = "postgresql://cheeseboard:cheeseboard@localhost:5432/cheeseboard"
 
+    # Elasticsearch
+    elasticsearch_url: str = ""
+
 
 settings = Settings()

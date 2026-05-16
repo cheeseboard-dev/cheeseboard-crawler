@@ -20,6 +20,7 @@ from app.exceptions import (
 from app.models.channel import ChannelResponse
 from app.notifier import send_alert
 from app.services.chzzk_client import LiveCursor, chzzk_client
+from app.services.es_client import es_client
 
 
 class CrawlScope(StrEnum):
@@ -99,9 +100,11 @@ async def crawl_channel(
     if videos:
         v_count = await db.upsert_videos(channel_id, videos)
         logger.info("upserted channel=%s videos=%d", channel_id, v_count)
+        await es_client.bulk_index_videos(channel.channel_name, channel_id, videos)
     if clips:
         c_count = await db.upsert_clips(channel_id, clips)
         logger.info("upserted channel=%s clips=%d", channel_id, c_count)
+        await es_client.bulk_index_clips(channel.channel_name, channel_id, clips)
 
     return ChannelCrawlResult(channel=channel, videos=videos, clips=clips)
 
@@ -117,10 +120,11 @@ async def ingest_home_clips(
     entries: list[tuple[clip_models.ClipResponse, ChannelResponse]],
     min_read_count: int = 100,
 ) -> dict[str, int]:
-    channels_seen = {channel.channel_id for _, channel in entries}
+    channels_by_id: dict[str, ChannelResponse] = {}
     channels_new = 0
     grouped: defaultdict[str, list[clip_models.ClipResponse]] = defaultdict(list)
     for clip, channel in entries:
+        channels_by_id[channel.channel_id] = channel
         if await upsert_stub_streamer_if_missing(channel):
             channels_new += 1
         if clip.read_count < min_read_count:
@@ -129,8 +133,10 @@ async def ingest_home_clips(
     clips_upserted = 0
     for channel_id, clips in grouped.items():
         clips_upserted += await db.upsert_clips(channel_id, clips)
+        ch = channels_by_id[channel_id]
+        await es_client.bulk_index_clips(ch.channel_name, channel_id, clips)
     return {
-        "channels_seen": len(channels_seen),
+        "channels_seen": len(channels_by_id),
         "channels_new": channels_new,
         "clips_upserted": clips_upserted,
     }
@@ -139,18 +145,21 @@ async def ingest_home_clips(
 async def ingest_home_videos(
     entries: list[tuple[video_models.VideoResponse, ChannelResponse]],
 ) -> dict[str, int]:
-    channels_seen = {channel.channel_id for _, channel in entries}
+    channels_by_id: dict[str, ChannelResponse] = {}
     channels_new = 0
     grouped: defaultdict[str, list[video_models.VideoResponse]] = defaultdict(list)
     for video, channel in entries:
+        channels_by_id[channel.channel_id] = channel
         if await upsert_stub_streamer_if_missing(channel):
             channels_new += 1
         grouped[channel.channel_id].append(video)
     videos_upserted = 0
     for channel_id, videos in grouped.items():
         videos_upserted += await db.upsert_videos(channel_id, videos)
+        ch = channels_by_id[channel_id]
+        await es_client.bulk_index_videos(ch.channel_name, channel_id, videos)
     return {
-        "channels_seen": len(channels_seen),
+        "channels_seen": len(channels_by_id),
         "channels_new": channels_new,
         "videos_upserted": videos_upserted,
     }
@@ -190,9 +199,15 @@ async def _crawl_one_safe(
                 channel_id, since=since, max_pages=max_video_pages
             )
             await db.upsert_videos(channel_id, videos)
+            if videos:
+                channel_name = await db.get_channel_name(channel_id)
+                await es_client.bulk_index_videos(channel_name, channel_id, videos)
         elif scope == CrawlScope.CLIPS:
             clips = await chzzk_client.get_clips(channel_id, since=since, max_pages=max_clip_pages)
             await db.upsert_clips(channel_id, clips)
+            if clips:
+                channel_name = await db.get_channel_name(channel_id)
+                await es_client.bulk_index_clips(channel_name, channel_id, clips)
         progress.success_count += 1
     except Exception as e:
         logger.error("crawl failed channel=%s scope=%s: %s", channel_id, scope.value, e)
@@ -212,6 +227,9 @@ async def _crawl_one_clips_watermark(
         clips = await chzzk_client.get_clips(channel_id, since=last_seen, max_pages=max_pages)
         clips = [c for c in clips if c.read_count >= min_read_count]
         await db.upsert_clips(channel_id, clips)
+        if clips:
+            channel_name = await db.get_channel_name(channel_id)
+            await es_client.bulk_index_clips(channel_name, channel_id, clips)
         progress.success_count += 1
     except Exception as e:
         logger.error("crawl failed channel=%s scope=%s: %s", channel_id, CrawlScope.CLIPS.value, e)

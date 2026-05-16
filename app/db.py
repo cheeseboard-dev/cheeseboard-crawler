@@ -354,6 +354,14 @@ async def get_streamer_stats(channel_id: str) -> dict | None:
         return dict(row) if row else None
 
 
+async def get_channel_name(channel_id: str) -> str:
+    async with orm_session.get_session() as session:
+        result = await session.execute(
+            select(Streamer.channel_name).where(Streamer.channel_id == channel_id).limit(1)
+        )
+        return result.scalar_one_or_none() or channel_id
+
+
 async def get_active_channel_ids() -> list[str]:
     stmt = (
         select(Streamer.channel_id)
