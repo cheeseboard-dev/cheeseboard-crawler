@@ -7,6 +7,7 @@ from app.config import settings
 from app.schemas import CrawlChannelResponse, ErrorResponse, JobResponse, JobStartedResponse
 from app.services import crawler
 from app.services.crawler import CrawlJobType, CrawlMode, CrawlScope
+from app.services.scheduler import run_hot_clips_poll, run_latest_videos_poll
 
 router = APIRouter(prefix="/crawl", tags=["crawl"])
 
@@ -188,3 +189,25 @@ async def retry_failed_channels(job_id: str, background_tasks: BackgroundTasks):
         since=None,
     )
     return {**job, "status": "started"}
+
+
+@router.post(
+    "/trigger/hot-clips",
+    status_code=202,
+    summary="홈 인기 클립 수집 수동 트리거",
+)
+async def trigger_hot_clips(background_tasks: BackgroundTasks):
+    """스케줄러의 `hot_clips_poll` 잡을 즉시 실행합니다. 이미 실행 중이면 건너뜁니다."""
+    background_tasks.add_task(run_hot_clips_poll)
+    return {"status": "triggered"}
+
+
+@router.post(
+    "/trigger/latest-videos",
+    status_code=202,
+    summary="홈 최신 영상 수집 수동 트리거",
+)
+async def trigger_latest_videos(background_tasks: BackgroundTasks):
+    """스케줄러의 `latest_videos_poll` 잡을 즉시 실행합니다. 이미 실행 중이면 건너뜁니다."""
+    background_tasks.add_task(run_latest_videos_poll)
+    return {"status": "triggered"}
