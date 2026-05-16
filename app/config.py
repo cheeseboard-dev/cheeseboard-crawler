@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     port: int = 8000
     debug: bool = False
     api_key_hash: str = ""
+    discord_webhook_url: str = ""
+    log_format: str = "json"
 
     chzzk_base_url: str = "https://api.chzzk.naver.com/service/v1"
     request_timeout: float = 10.0

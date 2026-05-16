@@ -8,11 +8,12 @@ from app.auth import require_api_key
 from app.config import settings
 from app.exception_handlers import cheeseboard_exception_handler, unhandled_exception_handler
 from app.exceptions import CheeseBoardException
+from app.log_config import setup_logging
 from app.routers import channels, content, crawl, streamers
 from app.services.chzzk_client import chzzk_client
 from app.services.scheduler import start_scheduler, stop_scheduler
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+setup_logging()
 
 
 @asynccontextmanager

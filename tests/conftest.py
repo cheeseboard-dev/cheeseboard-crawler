@@ -97,6 +97,7 @@ async def patch_db_session(monkeypatch, pgpool, postgres_container):
     monkeypatch.setattr(app.orm.session, "_engine", engine)
     monkeypatch.setattr(app.orm.session, "_session_factory", session_factory)
     monkeypatch.setattr(app.config.settings, "api_key_hash", "")
+    monkeypatch.setattr(app.config.settings, "discord_webhook_url", "")
     yield
     await engine.dispose()
 

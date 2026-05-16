@@ -17,6 +17,7 @@ from app.exceptions import (
     InvalidRequestException,
 )
 from app.models.channel import ChannelResponse
+from app.notifier import send_alert
 from app.services.chzzk_client import LiveCursor, chzzk_client
 
 
@@ -166,6 +167,26 @@ async def _finish_job(progress: CrawlJobProgress, error_msg: str | None = None) 
         progress.success_count,
         progress.failed_count,
     )
+    job_id = progress.job_id
+    if progress.total <= 0:
+        return
+    elif error_msg is not None:
+        await send_alert(
+            title="크롤 잡 실행 실패",
+            message=f"job_id={job_id} error={error_msg}",
+            level="error",
+        )
+    else:
+        failure_rate = progress.failed_count / max(progress.total, 1)
+        if failure_rate >= 0.3:
+            await send_alert(
+                title="크롤 잡 실패율 임계 초과",
+                message=(
+                    f"job_id={job_id} total={progress.total} success={progress.success_count} "
+                    f"failed={progress.failed_count} rate={failure_rate:.1%}"
+                ),
+                level="warning",
+            )
 
 
 async def run_crawl(
