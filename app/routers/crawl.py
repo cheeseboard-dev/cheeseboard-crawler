@@ -198,7 +198,7 @@ async def retry_failed_channels(job_id: str, background_tasks: BackgroundTasks):
 )
 async def trigger_hot_clips(background_tasks: BackgroundTasks):
     """스케줄러의 `hot_clips_poll` 잡을 즉시 실행합니다. 이미 실행 중이면 건너뜁니다."""
-    background_tasks.add_task(run_hot_clips_poll)
+    background_tasks.add_task(run_hot_clips_poll, "user")
     return {"status": "triggered"}
 
 
@@ -209,5 +209,5 @@ async def trigger_hot_clips(background_tasks: BackgroundTasks):
 )
 async def trigger_latest_videos(background_tasks: BackgroundTasks):
     """스케줄러의 `latest_videos_poll` 잡을 즉시 실행합니다. 이미 실행 중이면 건너뜁니다."""
-    background_tasks.add_task(run_latest_videos_poll)
+    background_tasks.add_task(run_latest_videos_poll, "user")
     return {"status": "triggered"}

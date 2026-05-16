@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
-async def run_hot_clips_poll() -> None:
+async def run_hot_clips_poll(triggered_by: str = "scheduler") -> None:
     if await db.has_running_job_of_type("hot_clips"):
         logger.warning("hot_clips_poll skipped: already running")
         return
 
-    job_id = await db.insert_crawl_job("hot_clips", total_streamers=0, triggered_by="scheduler")
+    job_id = await db.insert_crawl_job("hot_clips", total_streamers=0, triggered_by=triggered_by)
     try:
         entries: list = []
         cursor: str | None = None
@@ -44,7 +44,7 @@ async def run_hot_clips_poll() -> None:
         await db.update_crawl_job(job_id, status="failed", error_msg=str(e))
 
 
-async def run_latest_videos_poll() -> None:
+async def run_latest_videos_poll(triggered_by: str = "scheduler") -> None:
     if await db.has_running_job_of_type("latest_videos"):
         logger.warning("latest_videos_poll skipped: already running")
         return
@@ -52,7 +52,7 @@ async def run_latest_videos_poll() -> None:
     job_id = await db.insert_crawl_job(
         "latest_videos",
         total_streamers=0,
-        triggered_by="scheduler",
+        triggered_by=triggered_by,
     )
     try:
         entries: list = []
