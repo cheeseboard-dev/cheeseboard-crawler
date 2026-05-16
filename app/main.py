@@ -27,7 +27,10 @@ async def lifespan(app: FastAPI):
         cleaned = await db.cleanup_stale_jobs()
         if cleaned:
             logging.getLogger(__name__).warning("stale running jobs cleaned up: %d", cleaned)
-        await es_client.start()
+        try:
+            await es_client.start()
+        except Exception as e:
+            logging.getLogger(__name__).warning("ES client startup failed: %s", e)
         start_scheduler()
         scheduler_started = True
     except Exception as e:
