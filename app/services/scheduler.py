@@ -1,61 +1,133 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app import db
 from app.services import crawler
+from app.services.chzzk_client import chzzk_client
 
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
 
 
-async def _run_scheduled_crawl(job_type: crawler.CrawlJobType) -> None:
-    if await db.has_running_job_of_type(job_type):
-        logger.warning("scheduled %s crawl skipped: job already running", job_type)
+async def run_hot_clips_poll() -> None:
+    if await db.has_running_job_of_type("hot_clips"):
+        logger.warning("hot_clips_poll skipped: already running")
+        return
+
+    job_id = await db.insert_crawl_job("hot_clips", total_streamers=0, triggered_by="scheduler")
+    try:
+        entries: list = []
+        cursor: str | None = None
+        for _ in range(3):
+            page_entries, cursor = await chzzk_client.get_home_popular_clips(
+                filter_type="WITHIN_1_DAY",
+                next_cursor=cursor,
+                size=30,
+            )
+            entries.extend(page_entries)
+            if not cursor:
+                break
+        stats = await crawler.ingest_home_clips(entries, min_read_count=100)
+        await db.update_crawl_job(
+            job_id,
+            status="done",
+            total_streamers=stats.get("channels_seen", 0),
+            success_count=stats.get("clips_upserted", 0),
+        )
+        logger.info("hot_clips_poll done %s", stats)
+    except Exception as e:
+        logger.exception("hot_clips_poll failed")
+        await db.update_crawl_job(job_id, status="failed", error_msg=str(e))
+
+
+async def run_latest_videos_poll() -> None:
+    if await db.has_running_job_of_type("latest_videos"):
+        logger.warning("latest_videos_poll skipped: already running")
+        return
+
+    job_id = await db.insert_crawl_job(
+        "latest_videos",
+        total_streamers=0,
+        triggered_by="scheduler",
+    )
+    try:
+        entries: list = []
+        cursor: tuple[int, int] | None = None
+        for _ in range(2):
+            page_entries, cursor = await chzzk_client.get_home_videos(
+                sort_type="LATEST",
+                cursor_publish_date_at=cursor[0] if cursor else None,
+                cursor_read_count=cursor[1] if cursor else None,
+                size=30,
+            )
+            entries.extend(page_entries)
+            if not cursor:
+                break
+        stats = await crawler.ingest_home_videos(entries)
+        await db.update_crawl_job(
+            job_id,
+            status="done",
+            total_streamers=stats.get("channels_seen", 0),
+            success_count=stats.get("videos_upserted", 0),
+        )
+        logger.info("latest_videos_poll done %s", stats)
+    except Exception as e:
+        logger.exception("latest_videos_poll failed")
+        await db.update_crawl_job(job_id, status="failed", error_msg=str(e))
+
+
+async def run_channel_clips_incremental_job() -> None:
+    if await db.has_running_job_of_type("incremental"):
+        logger.warning("channel_clips_incremental skipped: already running")
         return
 
     channel_ids = await db.get_active_channel_ids()
     job_id = await db.insert_crawl_job(
-        job_type,
+        "incremental",
         total_streamers=len(channel_ids),
         triggered_by="scheduler",
     )
-
     if not channel_ids:
         await db.update_crawl_job(job_id, status="done", total_streamers=0)
-        logger.info("scheduled %s crawl skipped: no active streamers", job_type)
+        logger.info("channel_clips_incremental skipped: no active streamers")
         return
 
-    if job_type == "incremental":
-        await crawler.run_crawl(
-            job_id,
-            channel_ids,
-            scope=crawler.CrawlScope.FULL,
-            since=datetime.now() - timedelta(hours=3),
-            max_video_pages=3,
-            max_clip_pages=3,
-        )
-    else:
-        await crawler.run_crawl(
-            job_id,
-            channel_ids,
-            scope=crawler.CrawlScope.FULL,
-            since=None,
-            max_video_pages=None,
-            max_clip_pages=None,
-        )
+    await crawler.run_channel_clips_incremental(
+        job_id,
+        channel_ids,
+        max_pages=1,
+        min_read_count=100,
+    )
 
 
-async def run_incremental_crawl() -> None:
-    await _run_scheduled_crawl("incremental")
+async def run_weekly_reconciliation() -> None:
+    if await db.has_running_job_of_type("full"):
+        logger.warning("weekly_reconciliation skipped: already running")
+        return
 
+    channel_ids = await db.get_active_channel_ids()
+    job_id = await db.insert_crawl_job(
+        "full",
+        total_streamers=len(channel_ids),
+        triggered_by="scheduler",
+    )
+    if not channel_ids:
+        await db.update_crawl_job(job_id, status="done", total_streamers=0)
+        logger.info("weekly_reconciliation skipped: no active streamers")
+        return
 
-async def run_full_crawl() -> None:
-    await _run_scheduled_crawl("full")
+    await crawler.run_crawl(
+        job_id,
+        channel_ids,
+        scope=crawler.CrawlScope.FULL,
+        since=None,
+        max_video_pages=10,
+        max_clip_pages=5,
+    )
 
 
 def start_scheduler() -> AsyncIOScheduler:
@@ -65,20 +137,36 @@ def start_scheduler() -> AsyncIOScheduler:
 
     scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
     scheduler.add_job(
-        run_incremental_crawl,
+        run_hot_clips_poll,
         "interval",
-        hours=3,
-        id="incremental_crawl",
+        hours=1,
+        id="hot_clips_poll",
         max_instances=1,
         coalesce=True,
     )
     scheduler.add_job(
-        run_full_crawl,
+        run_latest_videos_poll,
+        "interval",
+        hours=1,
+        id="latest_videos_poll",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_channel_clips_incremental_job,
+        "interval",
+        hours=3,
+        id="channel_clips_incremental",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        run_weekly_reconciliation,
         "cron",
         day_of_week="sun",
         hour=3,
         minute=0,
-        id="weekly_full_crawl",
+        id="weekly_reconciliation",
         max_instances=1,
         coalesce=True,
     )
