@@ -82,6 +82,15 @@ class ChzzkClient:
                     if res.status_code == 200:
                         result: dict[str, Any] = res.json()
                         return result
+                    if res.status_code == 429:
+                        logger.warning(
+                            "Rate limited (attempt %d/%d), sleeping 60s: %s",
+                            attempt + 1,
+                            settings.retry_count,
+                            url,
+                        )
+                        await asyncio.sleep(60)
+                        continue
                     logger.warning(
                         "HTTP %d (attempt %d/%d): %s",
                         res.status_code,
