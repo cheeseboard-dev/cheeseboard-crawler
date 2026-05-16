@@ -6,11 +6,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app import db
 from app.exceptions import StreamerNotFoundException
 from app.models.channel import ChannelResponse
+from app.schemas import (
+    BulkRegisterResponse,
+    ErrorResponse,
+    StreamerActiveResponse,
+    StreamerRow,
+    StreamerStats,
+)
 from app.services.chzzk_client import chzzk_client
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/streamers", tags=["streamers"])
+
+_ERR_404 = {404: {"model": ErrorResponse, "description": "스트리머를 찾을 수 없음"}}
 
 
 class StreamerRegisterRequest(BaseModel):
@@ -41,15 +50,33 @@ class StreamerBulkEntry(BaseModel):
         return 0
 
 
-@router.post("")
+@router.post(
+    "",
+    response_model=ChannelResponse,
+    status_code=201,
+    summary="스트리머 등록",
+    responses={404: {"model": ErrorResponse, "description": "CHZZK에서 채널을 찾을 수 없음"}},
+)
 async def register_streamer(request: StreamerRegisterRequest):
+    """CHZZK API에서 채널 정보를 조회한 뒤 DB에 스트리머로 등록합니다."""
     channel = await chzzk_client.get_channel(request.channel_id)
     await db.upsert_streamer(channel)
     return channel
 
 
-@router.post("/bulk")
+@router.post(
+    "/bulk",
+    response_model=BulkRegisterResponse,
+    status_code=201,
+    summary="스트리머 일괄 등록",
+)
 async def register_streamers_bulk(entries: list[StreamerBulkEntry]):
+    """
+    CSV에서 추출한 스트리머 목록을 일괄 등록합니다.
+
+    CHZZK API 호출 없이 전달된 정보를 그대로 저장합니다.
+    각 항목의 필드명은 CSV 컬럼명(uuid, name, followers)을 그대로 사용합니다.
+    """
     success = 0
     failed_channels: list[str] = []
     for entry in entries:
@@ -72,21 +99,42 @@ async def register_streamers_bulk(entries: list[StreamerBulkEntry]):
     }
 
 
-@router.get("")
-async def list_streamers(active_only: bool = Query(default=False)):
+@router.get(
+    "",
+    response_model=list[StreamerRow],
+    summary="스트리머 목록 조회",
+)
+async def list_streamers(
+    active_only: bool = Query(
+        default=False, description="true이면 is_active=true인 스트리머만 반환"
+    ),
+):
+    """DB에 등록된 스트리머 목록을 반환합니다."""
     return await db.get_streamers(active_only=active_only)
 
 
-@router.get("/{channel_id}/stats")
+@router.get(
+    "/{channel_id}/stats",
+    response_model=StreamerStats,
+    summary="스트리머 통계 조회",
+    responses=_ERR_404,
+)
 async def get_streamer_stats(channel_id: str):
+    """스트리머의 수집된 동영상/클립 수, 최신 컨텐츠 날짜 등 통계를 반환합니다."""
     stats = await db.get_streamer_stats(channel_id)
     if stats is None:
         raise StreamerNotFoundException(channel_id)
     return stats
 
 
-@router.post("/{channel_id}/refresh")
+@router.post(
+    "/{channel_id}/refresh",
+    response_model=ChannelResponse,
+    summary="스트리머 정보 갱신",
+    responses=_ERR_404,
+)
 async def refresh_streamer(channel_id: str):
+    """CHZZK API에서 최신 채널 정보를 조회해 DB를 갱신합니다."""
     if not await db.streamer_exists(channel_id):
         raise StreamerNotFoundException(channel_id)
     channel = await chzzk_client.get_channel(channel_id)
@@ -94,8 +142,18 @@ async def refresh_streamer(channel_id: str):
     return channel
 
 
-@router.patch("/{channel_id}")
+@router.patch(
+    "/{channel_id}",
+    response_model=StreamerActiveResponse,
+    summary="스트리머 활성 상태 변경",
+    responses=_ERR_404,
+)
 async def update_streamer(channel_id: str, request: StreamerUpdateRequest):
+    """
+    스트리머의 `is_active` 값을 변경합니다.
+
+    `is_active=true`인 스트리머만 정기 스케줄러(증분 크롤, 주간 재조정)에 포함됩니다.
+    """
     updated = await db.set_streamer_active(channel_id, request.is_active)
     if not updated:
         raise StreamerNotFoundException(channel_id)
