@@ -19,3 +19,6 @@ class Streamer(Base):
     last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("TRUE"))
+    is_initial_crawled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("FALSE")
+    )

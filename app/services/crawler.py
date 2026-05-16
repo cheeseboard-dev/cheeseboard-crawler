@@ -120,6 +120,9 @@ async def crawl_channel(
         logger.info("upserted channel=%s clips=%d", channel_id, c_count)
         await es_client.bulk_index_clips(channel.channel_name, channel_id, clips)
 
+    if mode == "full":
+        await db.set_initial_crawled(channel_id)
+
     return ChannelCrawlResult(channel=channel, videos=videos, clips=clips)
 
 

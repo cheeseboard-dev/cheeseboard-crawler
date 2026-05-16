@@ -54,6 +54,7 @@ class StreamerRow(BaseModel):
     profile_image_url: str | None = None
     follower_count: int = 0
     is_active: bool = True
+    is_initial_crawled: bool = False
     updated_at: datetime | None = None
     last_crawled_at: datetime | None = None
     last_refreshed_at: datetime | None = None

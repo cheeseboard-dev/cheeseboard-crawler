@@ -83,6 +83,7 @@ async def upsert_streamer(channel: ChannelResponse) -> None:
             "updated_at": func.now(),
             "last_crawled_at": func.now(),
             "last_refreshed_at": func.now(),
+            # is_initial_crawled 은 여기서 건드리지 않음 — set_initial_crawled()로만 변경
         },
     )
     async with orm_session.get_session() as session:
@@ -380,3 +381,24 @@ async def set_streamer_active(channel_id: str, is_active: bool) -> bool:
         result = await session.execute(stmt)
         await session.commit()
         return bool(result.rowcount == 1)
+
+
+async def set_initial_crawled(channel_id: str) -> None:
+    stmt = (
+        sa_update(Streamer).where(Streamer.channel_id == channel_id).values(is_initial_crawled=True)
+    )
+    async with orm_session.get_session() as session:
+        await session.execute(stmt)
+        await session.commit()
+
+
+async def get_uncrawled_channel_ids() -> list[str]:
+    """초기 전체 크롤이 완료되지 않은 활성 스트리머 ID 목록을 반환합니다."""
+    stmt = (
+        select(Streamer.channel_id)
+        .where(Streamer.is_active.is_(True), Streamer.is_initial_crawled.is_(False))
+        .order_by(Streamer.channel_name)
+    )
+    async with orm_session.get_session() as session:
+        result = await session.execute(stmt)
+        return list(result.scalars().all())
