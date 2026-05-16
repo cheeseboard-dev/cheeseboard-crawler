@@ -1,6 +1,8 @@
+import csv
+import io
 import logging
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app import db
@@ -158,3 +160,60 @@ async def update_streamer(channel_id: str, request: StreamerUpdateRequest):
     if not updated:
         raise StreamerNotFoundException(channel_id)
     return {"channel_id": channel_id, "is_active": request.is_active}
+
+
+@router.post(
+    "/import-csv",
+    response_model=BulkRegisterResponse,
+    status_code=201,
+    summary="CSV 파일로 스트리머 일괄 등록",
+)
+async def import_streamers_csv(file: UploadFile):
+    """
+    CSV 파일을 업로드해 스트리머를 일괄 등록합니다.
+
+    필수 컬럼: `channel_id`, `channel_name`
+    선택 컬럼: `profile_image` (또는 `profile_image_url`), `follower_count`
+
+    CHZZK API 호출 없이 CSV 데이터를 그대로 저장합니다.
+    """
+    content = await file.read()
+    text = content.decode("utf-8-sig")  # BOM 있는 UTF-8도 처리
+    reader = csv.DictReader(io.StringIO(text))
+
+    success = 0
+    failed_channels: list[str] = []
+
+    for row in reader:
+        channel_id = (row.get("channel_id") or "").strip()
+        channel_name = (row.get("channel_name") or "").strip()
+        if not channel_id or not channel_name:
+            continue
+        try:
+            profile_image_url = (
+                row.get("profile_image_url") or row.get("profile_image") or ""
+            ).strip() or None
+            follower_count_raw = (row.get("follower_count") or "0").strip()
+            try:
+                follower_count = int(follower_count_raw.replace(",", ""))
+            except ValueError:
+                follower_count = 0
+
+            channel = ChannelResponse(
+                channel_id=channel_id,
+                channel_name=channel_name,
+                profile_image_url=profile_image_url,
+                follower_count=follower_count,
+            )
+            await db.upsert_streamer(channel)
+            success += 1
+        except Exception as e:
+            logger.error("csv import failed channel_id=%s: %s", channel_id, e)
+            failed_channels.append(channel_id)
+
+    return {
+        "total": success + len(failed_channels),
+        "success": success,
+        "failed": len(failed_channels),
+        "failed_channels": failed_channels,
+    }
