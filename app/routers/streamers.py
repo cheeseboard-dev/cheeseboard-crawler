@@ -2,7 +2,7 @@ import csv
 import io
 import logging
 
-from fastapi import APIRouter, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app import db
@@ -11,11 +11,14 @@ from app.models.channel import ChannelResponse
 from app.schemas import (
     BulkRegisterResponse,
     ErrorResponse,
+    JobStartedResponse,
     StreamerActiveResponse,
     StreamerRow,
     StreamerStats,
 )
+from app.services import crawler
 from app.services.chzzk_client import chzzk_client
+from app.services.crawler import CrawlScope
 
 logger = logging.getLogger(__name__)
 
@@ -164,56 +167,33 @@ async def update_streamer(channel_id: str, request: StreamerUpdateRequest):
 
 @router.post(
     "/import-csv",
-    response_model=BulkRegisterResponse,
-    status_code=201,
-    summary="CSV 파일로 스트리머 일괄 등록",
+    response_model=JobStartedResponse,
+    status_code=202,
+    summary="CSV 파일로 스트리머 일괄 등록 (CHZZK 크롤)",
 )
-async def import_streamers_csv(file: UploadFile):
+async def import_streamers_csv(file: UploadFile, background_tasks: BackgroundTasks):
     """
-    CSV 파일을 업로드해 스트리머를 일괄 등록합니다.
+    CSV에서 `channel_id`(UUID)만 읽어 CHZZK API에서 채널 정보를 직접 크롤합니다.
 
-    필수 컬럼: `channel_id`, `channel_name`
-    선택 컬럼: `profile_image` (또는 `profile_image_url`), `follower_count`
-
-    CHZZK API 호출 없이 CSV 데이터를 그대로 저장합니다.
+    헤더 컬럼명이 `channel_id`이거나 첫 번째 컬럼을 UUID로 사용합니다.
+    처리는 백그라운드로 실행되며 즉시 `job_id`를 반환합니다.
+    진행 상황은 `GET /crawl/jobs/{job_id}`로 확인합니다.
     """
     content = await file.read()
-    text = content.decode("utf-8-sig")  # BOM 있는 UTF-8도 처리
+    text = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
 
-    success = 0
-    failed_channels: list[str] = []
-
+    channel_ids: list[str] = []
     for row in reader:
-        channel_id = (row.get("channel_id") or "").strip()
-        channel_name = (row.get("channel_name") or "").strip()
-        if not channel_id or not channel_name:
-            continue
-        try:
-            profile_image_url = (
-                row.get("profile_image_url") or row.get("profile_image") or ""
-            ).strip() or None
-            follower_count_raw = (row.get("follower_count") or "0").strip()
-            try:
-                follower_count = int(follower_count_raw.replace(",", ""))
-            except ValueError:
-                follower_count = 0
+        cid = (row.get("channel_id") or next(iter(row.values()), "") or "").strip()
+        if cid:
+            channel_ids.append(cid)
 
-            channel = ChannelResponse(
-                channel_id=channel_id,
-                channel_name=channel_name,
-                profile_image_url=profile_image_url,
-                follower_count=follower_count,
-            )
-            await db.upsert_streamer(channel)
-            success += 1
-        except Exception as e:
-            logger.error("csv import failed channel_id=%s: %s", channel_id, e)
-            failed_channels.append(channel_id)
-
-    return {
-        "total": success + len(failed_channels),
-        "success": success,
-        "failed": len(failed_channels),
-        "failed_channels": failed_channels,
-    }
+    job = await crawler.create_job(channel_ids, job_type="initial", triggered_by="user")
+    background_tasks.add_task(
+        crawler.run_crawl,
+        job["job_id"],
+        channel_ids,
+        CrawlScope.STREAMERS_ONLY,
+    )
+    return {**job, "status": "started"}
