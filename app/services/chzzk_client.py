@@ -304,5 +304,113 @@ class ChzzkClient:
             )
         return channel_ids, next_cursor
 
+    async def get_home_popular_clips(
+        self,
+        filter_type: str = "WITHIN_1_DAY",
+        next_cursor: str | None = None,
+        size: int = 30,
+    ) -> tuple[list[tuple[clip_models.ClipResponse, ChannelResponse]], str | None]:
+        url = f"{settings.chzzk_base_url}/home/recommended/clips"
+        params: dict[str, Any] = {
+            "filterType": filter_type,
+            "orderType": "POPULAR",
+            "size": size,
+        }
+        if next_cursor:
+            params["next"] = next_cursor
+
+        data = await self._fetch(url, params)
+        content = (data or {}).get("content") or {}
+        items = content.get("data") or []
+        next_token: str | None = ((content.get("page") or {}).get("next") or {}).get("next")
+
+        result: list[tuple[clip_models.ClipResponse, ChannelResponse]] = []
+        for c in items:
+            try:
+                owner = c.get("ownerChannel") or {}
+                channel_id = owner.get("channelId") or c.get("ownerChannelId")
+                if not channel_id:
+                    continue
+                channel = ChannelResponse(
+                    channel_id=channel_id,
+                    channel_name=owner.get("channelName") or channel_id,
+                    profile_image_url=owner.get("channelImageUrl"),
+                    follower_count=0,
+                )
+                clip = clip_models.ClipResponse(
+                    clip_uid=c["clipUID"],
+                    title=c["clipTitle"],
+                    created_at=self._parse_date(c.get("createdDate")),
+                    read_count=c.get("readCount", 0),
+                    duration=c.get("duration", 0),
+                    thumbnail_url=c.get("thumbnailImageUrl"),
+                    origin_video_id=c.get("videoId"),
+                    link=f"https://chzzk.naver.com/clips/{c['clipUID']}",
+                )
+                result.append((clip, channel))
+            except Exception as e:
+                logger.warning("home clip 파싱 스킵 (clip_uid=%s): %s", c.get("clipUID"), e)
+        return result, next_token
+
+    async def get_home_videos(
+        self,
+        sort_type: str = "LATEST",
+        cursor_publish_date_at: int | None = None,
+        cursor_read_count: int | None = None,
+        size: int = 30,
+    ) -> tuple[
+        list[tuple[video_models.VideoResponse, ChannelResponse]],
+        tuple[int, int] | None,
+    ]:
+        url = f"{settings.chzzk_base_url}/home/videos"
+        params: dict[str, Any] = {"sortType": sort_type, "size": size}
+        if cursor_publish_date_at is not None:
+            params["publishDateAt"] = cursor_publish_date_at
+        if cursor_read_count is not None:
+            params["readCount"] = cursor_read_count
+
+        data = await self._fetch(url, params)
+        content = (data or {}).get("content") or {}
+        items = content.get("data") or []
+        next_info = (content.get("page") or {}).get("next") or {}
+        next_cursor: tuple[int, int] | None = None
+        if "publishDateAt" in next_info:
+            next_cursor = (
+                int(next_info["publishDateAt"]),
+                int(next_info.get("readCount", 0)),
+            )
+
+        result: list[tuple[video_models.VideoResponse, ChannelResponse]] = []
+        for v in items:
+            try:
+                ch = v.get("channel") or {}
+                channel_id = ch.get("channelId")
+                if not channel_id:
+                    continue
+                channel = ChannelResponse(
+                    channel_id=channel_id,
+                    channel_name=ch.get("channelName") or channel_id,
+                    profile_image_url=ch.get("channelImageUrl"),
+                    follower_count=0,
+                )
+                date_key = "publishDateAt" if "publishDateAt" in v else "publishDate"
+                published_str = self._parse_date(v.get(date_key))
+                video = video_models.VideoResponse(
+                    video_no=v["videoNo"],
+                    video_id=v.get("videoId"),
+                    title=v["videoTitle"],
+                    category=v.get("videoCategoryValue", "미지정"),
+                    tags=v.get("tags", []),
+                    published_at=published_str,
+                    read_count=v.get("readCount", 0),
+                    duration=v.get("duration", 0),
+                    thumbnail_url=v.get("thumbnailImageUrl"),
+                    link=f"https://chzzk.naver.com/video/{v['videoNo']}",
+                )
+                result.append((video, channel))
+            except Exception as e:
+                logger.warning("home video 파싱 스킵 (video_no=%s): %s", v.get("videoNo"), e)
+        return result, next_cursor
+
 
 chzzk_client = ChzzkClient()

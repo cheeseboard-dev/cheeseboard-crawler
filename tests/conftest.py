@@ -117,6 +117,8 @@ def mock_chzzk(monkeypatch):
         get_live_page=AsyncMock(return_value=([], None)),
         get_video=AsyncMock(return_value=None),
         get_clip=AsyncMock(return_value=None),
+        get_home_popular_clips=AsyncMock(return_value=([], None)),
+        get_home_videos=AsyncMock(return_value=([], None)),
         start=AsyncMock(return_value=None),
         stop=AsyncMock(return_value=None),
     )
