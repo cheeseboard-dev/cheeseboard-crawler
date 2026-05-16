@@ -75,7 +75,9 @@ class ChzzkClient:
     async def _fetch(self, url: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
         assert self._semaphore is not None and self._client is not None
         async with self._semaphore:
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+            await asyncio.sleep(
+                random.uniform(settings.request_delay_min, settings.request_delay_max)
+            )
             for attempt in range(settings.retry_count):
                 try:
                     res = await self._client.get(url, params=params)

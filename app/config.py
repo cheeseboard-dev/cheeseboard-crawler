@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     chzzk_base_url: str = "https://api.chzzk.naver.com/service/v1"
     request_timeout: float = 10.0
     max_concurrent_requests: int = 3
+    request_delay_min: float = 2.0
+    request_delay_max: float = 4.0
     retry_count: int = 3
 
     default_video_pages: int = 10
