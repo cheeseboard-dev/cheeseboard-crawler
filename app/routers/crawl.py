@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.services import crawler
-from app.services.crawler import CrawlMode
+from app.services.crawler import CrawlJobType, CrawlMode, CrawlScope
 
 router = APIRouter(prefix="/crawl", tags=["crawl"])
 
@@ -44,14 +44,24 @@ async def crawl_single_channel(
 
 
 @router.post("/bulk")
-async def crawl_bulk(request: ChannelListRequest, background_tasks: BackgroundTasks):
-    job = await crawler.create_job(request.channel_ids, job_type="user_bulk")
+async def crawl_bulk(
+    request: ChannelListRequest,
+    background_tasks: BackgroundTasks,
+    scope: CrawlScope = Query(default=CrawlScope.FULL),
+):
+    if scope == CrawlScope.VIDEOS:
+        job_type: CrawlJobType = "user_videos"
+    elif scope == CrawlScope.CLIPS:
+        job_type = "user_clips"
+    else:
+        job_type = "user_bulk"
+    job = await crawler.create_job(request.channel_ids, job_type=job_type)
     background_tasks.add_task(
-        crawler.run_bulk_crawl,
+        crawler.run_crawl,
         job["job_id"],
         request.channel_ids,
+        scope,
         request.since,
-        "full",
         _normalize_pages(request.max_video_pages)
         if request.max_video_pages is not None
         else settings.default_video_pages,
@@ -88,36 +98,6 @@ async def crawl_live(
         _normalize_pages(max_clip_pages),
     )
     return {"job_id": job["job_id"], "status": "started", "mode": mode}
-
-
-@router.post("/videos")
-async def crawl_videos(request: ChannelListRequest, background_tasks: BackgroundTasks):
-    job = await crawler.create_job(request.channel_ids, job_type="user_videos")
-    background_tasks.add_task(
-        crawler.run_videos_crawl,
-        job["job_id"],
-        request.channel_ids,
-        request.since,
-        _normalize_pages(request.max_video_pages)
-        if request.max_video_pages is not None
-        else settings.default_video_pages,
-    )
-    return {**job, "status": "started"}
-
-
-@router.post("/clips")
-async def crawl_clips(request: ChannelListRequest, background_tasks: BackgroundTasks):
-    job = await crawler.create_job(request.channel_ids, job_type="user_clips")
-    background_tasks.add_task(
-        crawler.run_clips_crawl,
-        job["job_id"],
-        request.channel_ids,
-        request.since,
-        _normalize_pages(request.max_clip_pages)
-        if request.max_clip_pages is not None
-        else settings.default_clip_pages,
-    )
-    return {**job, "status": "started"}
 
 
 @router.get("/jobs")
