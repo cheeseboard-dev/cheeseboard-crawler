@@ -4,6 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 import app.models.clip as clip_models
@@ -17,6 +18,14 @@ from app.exceptions import (
 )
 from app.models.channel import ChannelResponse
 from app.services.chzzk_client import LiveCursor, chzzk_client
+
+
+class CrawlScope(StrEnum):
+    FULL = "full"
+    VIDEOS = "videos"
+    CLIPS = "clips"
+    STREAMERS_ONLY = "streamers_only"
+
 
 logger = logging.getLogger(__name__)
 
@@ -105,25 +114,36 @@ async def _sync_job_progress(progress: CrawlJobProgress) -> None:
     )
 
 
-async def _crawl_channel_safe(
+async def _crawl_one_safe(
     progress: CrawlJobProgress,
     channel_id: str,
+    scope: CrawlScope,
     since: datetime | None = None,
-    mode: CrawlMode = "full",
     max_video_pages: int | None = settings.default_video_pages,
     max_clip_pages: int | None = settings.default_clip_pages,
 ) -> None:
     try:
-        await crawl_channel(
-            channel_id,
-            since=since,
-            mode=mode,
-            max_video_pages=max_video_pages,
-            max_clip_pages=max_clip_pages,
-        )
+        if scope == CrawlScope.FULL:
+            await crawl_channel(
+                channel_id,
+                since,
+                mode="full",
+                max_video_pages=max_video_pages,
+                max_clip_pages=max_clip_pages,
+            )
+        elif scope == CrawlScope.STREAMERS_ONLY:
+            await crawl_channel(channel_id, since=None, mode="streamers_only")
+        elif scope == CrawlScope.VIDEOS:
+            videos = await chzzk_client.get_videos(
+                channel_id, since=since, max_pages=max_video_pages
+            )
+            await db.upsert_videos(channel_id, videos)
+        elif scope == CrawlScope.CLIPS:
+            clips = await chzzk_client.get_clips(channel_id, since=since, max_pages=max_clip_pages)
+            await db.upsert_clips(channel_id, clips)
         progress.success_count += 1
     except Exception as e:
-        logger.error("channel crawl failed channel=%s: %s", channel_id, e)
+        logger.error("crawl failed channel=%s scope=%s: %s", channel_id, scope.value, e)
         progress.failed_count += 1
         progress.failed_channels.append(channel_id)
     await _sync_job_progress(progress)
@@ -148,6 +168,29 @@ async def _finish_job(progress: CrawlJobProgress, error_msg: str | None = None) 
     )
 
 
+async def run_crawl(
+    job_id: str,
+    channel_ids: list[str],
+    scope: CrawlScope = CrawlScope.FULL,
+    since: datetime | None = None,
+    max_video_pages: int | None = settings.default_video_pages,
+    max_clip_pages: int | None = settings.default_clip_pages,
+) -> None:
+    progress = CrawlJobProgress(job_id=job_id, total=len(channel_ids))
+    logger.info("crawl started job=%s total=%d scope=%s", job_id, len(channel_ids), scope.value)
+    try:
+        await asyncio.gather(
+            *[
+                _crawl_one_safe(progress, cid, scope, since, max_video_pages, max_clip_pages)
+                for cid in channel_ids
+            ]
+        )
+        await _finish_job(progress)
+    except Exception as e:
+        logger.exception("crawl failed job=%s", job_id)
+        await _finish_job(progress, error_msg=str(e))
+
+
 async def run_bulk_crawl(
     job_id: str,
     channel_ids: list[str],
@@ -156,26 +199,8 @@ async def run_bulk_crawl(
     max_video_pages: int | None = settings.default_video_pages,
     max_clip_pages: int | None = settings.default_clip_pages,
 ) -> None:
-    progress = CrawlJobProgress(job_id=job_id, total=len(channel_ids))
-    logger.info("bulk crawl started job=%s total=%d mode=%s", job_id, len(channel_ids), mode)
-    try:
-        await asyncio.gather(
-            *[
-                _crawl_channel_safe(
-                    progress,
-                    cid,
-                    since=since,
-                    mode=mode,
-                    max_video_pages=max_video_pages,
-                    max_clip_pages=max_clip_pages,
-                )
-                for cid in channel_ids
-            ]
-        )
-        await _finish_job(progress)
-    except Exception as e:
-        logger.exception("bulk crawl failed job=%s", job_id)
-        await _finish_job(progress, error_msg=str(e))
+    scope = CrawlScope.STREAMERS_ONLY if mode == "streamers_only" else CrawlScope.FULL
+    await run_crawl(job_id, channel_ids, scope, since, max_video_pages, max_clip_pages)
 
 
 async def run_live_crawl(
@@ -204,13 +229,13 @@ async def run_live_crawl(
             logger.info("live page=%d channels=%d", page_num, len(channel_ids))
             await asyncio.gather(
                 *[
-                    _crawl_channel_safe(
+                    _crawl_one_safe(
                         progress,
                         cid,
-                        since=since,
-                        mode=mode,
-                        max_video_pages=max_video_pages,
-                        max_clip_pages=max_clip_pages,
+                        CrawlScope.FULL if mode == "full" else CrawlScope.STREAMERS_ONLY,
+                        since,
+                        max_video_pages,
+                        max_clip_pages,
                     )
                     for cid in channel_ids
                 ]
@@ -224,56 +249,13 @@ async def run_live_crawl(
         await _finish_job(progress, error_msg=str(e))
 
 
-async def _crawl_videos_safe(
-    progress: CrawlJobProgress,
-    channel_id: str,
-    since: datetime | None,
-    max_pages: int | None = settings.default_video_pages,
-) -> None:
-    try:
-        videos = await chzzk_client.get_videos(channel_id, since=since, max_pages=max_pages)
-        await db.upsert_videos(channel_id, videos)
-        progress.success_count += 1
-    except Exception as e:
-        logger.error("videos crawl failed channel=%s: %s", channel_id, e)
-        progress.failed_count += 1
-        progress.failed_channels.append(channel_id)
-    await _sync_job_progress(progress)
-
-
-async def _crawl_clips_safe(
-    progress: CrawlJobProgress,
-    channel_id: str,
-    since: datetime | None,
-    max_pages: int | None = settings.default_clip_pages,
-) -> None:
-    try:
-        clips = await chzzk_client.get_clips(channel_id, since=since, max_pages=max_pages)
-        await db.upsert_clips(channel_id, clips)
-        progress.success_count += 1
-    except Exception as e:
-        logger.error("clips crawl failed channel=%s: %s", channel_id, e)
-        progress.failed_count += 1
-        progress.failed_channels.append(channel_id)
-    await _sync_job_progress(progress)
-
-
 async def run_videos_crawl(
     job_id: str,
     channel_ids: list[str],
     since: datetime | None,
     max_pages: int | None = settings.default_video_pages,
 ) -> None:
-    progress = CrawlJobProgress(job_id=job_id, total=len(channel_ids))
-    logger.info("videos crawl started job=%s total=%d", job_id, len(channel_ids))
-    try:
-        await asyncio.gather(
-            *[_crawl_videos_safe(progress, cid, since, max_pages) for cid in channel_ids]
-        )
-        await _finish_job(progress)
-    except Exception as e:
-        logger.exception("videos crawl failed job=%s", job_id)
-        await _finish_job(progress, error_msg=str(e))
+    await run_crawl(job_id, channel_ids, CrawlScope.VIDEOS, since, max_video_pages=max_pages)
 
 
 async def run_clips_crawl(
@@ -282,16 +264,7 @@ async def run_clips_crawl(
     since: datetime | None,
     max_pages: int | None = settings.default_clip_pages,
 ) -> None:
-    progress = CrawlJobProgress(job_id=job_id, total=len(channel_ids))
-    logger.info("clips crawl started job=%s total=%d", job_id, len(channel_ids))
-    try:
-        await asyncio.gather(
-            *[_crawl_clips_safe(progress, cid, since, max_pages) for cid in channel_ids]
-        )
-        await _finish_job(progress)
-    except Exception as e:
-        logger.exception("clips crawl failed job=%s", job_id)
-        await _finish_job(progress, error_msg=str(e))
+    await run_crawl(job_id, channel_ids, CrawlScope.CLIPS, since, max_clip_pages=max_pages)
 
 
 async def create_job(
