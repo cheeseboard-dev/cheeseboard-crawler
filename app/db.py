@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime
 
@@ -12,6 +13,8 @@ import app.models.video as video_models
 from app.models.channel import ChannelResponse
 from app.orm import Clip, CrawlJob, Streamer, Video
 from app.orm import session as orm_session
+
+logger = logging.getLogger(__name__)
 
 init_pool = orm_session.init_engine
 close_pool = orm_session.close_engine
@@ -130,13 +133,22 @@ async def upsert_clips(channel_id: str, clips: list[clip_models.ClipResponse]) -
     if not clips:
         return 0
     candidate_ids = list({c.origin_video_id for c in clips if c.origin_video_id})
-    if not candidate_ids:
-        return 0
     async with orm_session.get_session() as session:
-        rows_v = await session.execute(
-            select(Video.video_id).where(Video.video_id.in_(candidate_ids))
+        known_video_ids: set[str] = set()
+        if candidate_ids:
+            rows_v = await session.execute(
+                select(Video.video_id).where(Video.video_id.in_(candidate_ids))
+            )
+            known_video_ids = set(rows_v.scalars().all())
+        dropped = sum(
+            1 for c in clips if c.origin_video_id and c.origin_video_id not in known_video_ids
         )
-        known_video_ids = set(rows_v.scalars().all())
+        if dropped:
+            logger.debug(
+                "upsert_clips: skipped %d clip(s) with unresolved origin_video_id channel=%s",
+                dropped,
+                channel_id,
+            )
         rows = [
             {
                 "clip_uid": c.clip_uid,
@@ -150,7 +162,7 @@ async def upsert_clips(channel_id: str, clips: list[clip_models.ClipResponse]) -
                 "last_refreshed_at": func.now(),
             }
             for c in clips
-            if c.origin_video_id in known_video_ids
+            if c.origin_video_id is None or c.origin_video_id in known_video_ids
         ]
         if not rows:
             return 0
