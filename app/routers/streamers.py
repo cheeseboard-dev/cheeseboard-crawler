@@ -1,9 +1,14 @@
+import logging
+
 from fastapi import APIRouter, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app import db
 from app.exceptions import StreamerNotFoundException
+from app.models.channel import ChannelResponse
 from app.services.chzzk_client import chzzk_client
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/streamers", tags=["streamers"])
 
@@ -16,11 +21,55 @@ class StreamerUpdateRequest(BaseModel):
     is_active: bool
 
 
+class StreamerBulkEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    channel_id: str = Field(alias="uuid")
+    channel_name: str = Field(alias="name")
+    follower_count: int = Field(default=0, alias="followers")
+
+    @field_validator("follower_count", mode="before")
+    @classmethod
+    def _parse_followers(cls, v: object) -> int:
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v.replace(",", "").strip())
+            except ValueError:
+                return 0
+        return 0
+
+
 @router.post("")
 async def register_streamer(request: StreamerRegisterRequest):
     channel = await chzzk_client.get_channel(request.channel_id)
     await db.upsert_streamer(channel)
     return channel
+
+
+@router.post("/bulk")
+async def register_streamers_bulk(entries: list[StreamerBulkEntry]):
+    success = 0
+    failed_channels: list[str] = []
+    for entry in entries:
+        try:
+            channel = ChannelResponse(
+                channel_id=entry.channel_id,
+                channel_name=entry.channel_name,
+                follower_count=entry.follower_count,
+            )
+            await db.upsert_streamer(channel)
+            success += 1
+        except Exception as e:
+            logger.error("bulk upsert failed channel_id=%s: %s", entry.channel_id, e)
+            failed_channels.append(entry.channel_id)
+    return {
+        "total": len(entries),
+        "success": success,
+        "failed": len(failed_channels),
+        "failed_channels": failed_channels,
+    }
 
 
 @router.get("")

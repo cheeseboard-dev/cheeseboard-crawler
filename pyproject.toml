@@ -11,6 +11,7 @@ lint       = "ruff check app"
 fmt        = "ruff format app"
 typecheck  = "mypy app"
 pre-commit = "pre-commit run --all-files"
+test       = "pytest -v"
 
 # ── Ruff (linter + formatter) ─────────────────────────────────────────────────
 [tool.ruff]
