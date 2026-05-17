@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -142,11 +143,12 @@ async def run_weekly_reconciliation() -> None:
         logger.info("weekly_reconciliation skipped: no active streamers")
         return
 
+    since = datetime.now() - timedelta(days=30)
     await crawler.run_crawl(
         job_id,
         channel_ids,
         scope=crawler.CrawlScope.FULL,
-        since=None,
+        since=since,
         max_video_pages=10,
         max_clip_pages=5,
     )
