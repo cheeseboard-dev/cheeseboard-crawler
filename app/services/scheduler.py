@@ -88,8 +88,8 @@ async def run_weekly_reconciliation() -> None:
         job_id,
         CrawlScope.FULL,
         since=since,
-        max_video_pages=10,
-        max_clip_pages=5,
+        max_video_pages=None,
+        max_clip_pages=None,
     )
 
 

@@ -81,6 +81,8 @@ async def crawl_bulk(
     else:
         job_type = "user_bulk"
     job = await crawler.create_job(request.channel_ids, job_type=job_type)
+    default_video = None if request.since else settings.default_video_pages
+    default_clip = None if request.since else settings.default_clip_pages
     await enqueue_channels(
         request.channel_ids,
         str(job["job_id"]),
@@ -88,10 +90,10 @@ async def crawl_bulk(
         since=request.since,
         max_video_pages=_normalize_pages(request.max_video_pages)
         if request.max_video_pages is not None
-        else settings.default_video_pages,
+        else default_video,
         max_clip_pages=_normalize_pages(request.max_clip_pages)
         if request.max_clip_pages is not None
-        else settings.default_clip_pages,
+        else default_clip,
     )
     return {**job, "status": "queued"}
 
