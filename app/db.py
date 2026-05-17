@@ -4,8 +4,9 @@ import logging
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import Text, func, select
 from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import app.models.clip as clip_models
@@ -390,6 +391,48 @@ async def set_initial_crawled(channel_id: str) -> None:
     async with orm_session.get_session() as session:
         await session.execute(stmt)
         await session.commit()
+
+
+async def increment_job_progress(
+    job_id: str,
+    *,
+    success: bool,
+    failed_channel: str | None = None,
+) -> bool:
+    """성공/실패 카운트를 원자적으로 증가. 모든 채널이 처리됐으면 True 반환."""
+    if success:
+        stmt = (
+            sa_update(CrawlJob)
+            .where(CrawlJob.id == uuid.UUID(job_id))
+            .values(success_count=CrawlJob.success_count + 1)
+            .returning(CrawlJob.success_count, CrawlJob.failed_count, CrawlJob.total_streamers)
+        )
+    else:
+        stmt = (
+            sa_update(CrawlJob)
+            .where(CrawlJob.id == uuid.UUID(job_id))
+            .values(failed_count=CrawlJob.failed_count + 1)
+            .returning(CrawlJob.success_count, CrawlJob.failed_count, CrawlJob.total_streamers)
+        )
+    async with orm_session.get_session() as session:
+        result = await session.execute(stmt)
+        if not success and failed_channel:
+            await session.execute(
+                sa_update(CrawlJob)
+                .where(CrawlJob.id == uuid.UUID(job_id))
+                .values(
+                    failed_channels=func.array_append(
+                        func.coalesce(CrawlJob.failed_channels, func.cast([], ARRAY(Text))),
+                        failed_channel,
+                    )
+                )
+            )
+        await session.commit()
+        row = result.one()
+        total = row.total_streamers or 0
+        if total <= 0:
+            return False
+        return bool((row.success_count + row.failed_count) >= total)
 
 
 async def get_uncrawled_channel_ids() -> list[str]:

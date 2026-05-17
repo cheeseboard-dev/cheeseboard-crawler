@@ -9,6 +9,8 @@ from app.config import settings
 from app.exception_handlers import cheeseboard_exception_handler, unhandled_exception_handler
 from app.exceptions import CheeseBoardException
 from app.log_config import setup_logging
+from app.queue import close_pool as close_queue_pool
+from app.queue import get_pool as get_queue_pool
 from app.routers import channels, content, crawl, streamers
 from app.services.chzzk_client import chzzk_client
 from app.services.es_client import es_client
@@ -31,6 +33,8 @@ async def lifespan(app: FastAPI):
             await es_client.start()
         except Exception as e:
             logging.getLogger(__name__).warning("ES client startup failed: %s", e)
+        await get_queue_pool()
+        logging.getLogger(__name__).info("arq queue pool initialized")
         start_scheduler()
         scheduler_started = True
     except Exception as e:
@@ -38,6 +42,7 @@ async def lifespan(app: FastAPI):
     yield
     if scheduler_started:
         stop_scheduler()
+    await close_queue_pool()
     await es_client.stop()
     await chzzk_client.stop()
     await db.close_pool()

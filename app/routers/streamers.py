@@ -2,12 +2,13 @@ import csv
 import io
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Query, UploadFile
+from fastapi import APIRouter, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app import db
 from app.exceptions import StreamerNotFoundException
 from app.models.channel import ChannelResponse
+from app.queue import enqueue_channels
 from app.schemas import (
     BulkRegisterResponse,
     ErrorResponse,
@@ -171,7 +172,7 @@ async def update_streamer(channel_id: str, request: StreamerUpdateRequest):
     status_code=202,
     summary="CSV 파일로 스트리머 일괄 등록 (CHZZK 크롤)",
 )
-async def import_streamers_csv(file: UploadFile, background_tasks: BackgroundTasks):
+async def import_streamers_csv(file: UploadFile):
     """
     CSV에서 `channel_id`(UUID)만 읽어 CHZZK API에서 채널 정보를 직접 크롤합니다.
 
@@ -190,10 +191,5 @@ async def import_streamers_csv(file: UploadFile, background_tasks: BackgroundTas
             channel_ids.append(cid)
 
     job = await crawler.create_job(channel_ids, job_type="initial", triggered_by="user")
-    background_tasks.add_task(
-        crawler.run_crawl,
-        job["job_id"],
-        channel_ids,
-        CrawlScope.FULL,
-    )
-    return {**job, "status": "started"}
+    await enqueue_channels(channel_ids, str(job["job_id"]), CrawlScope.FULL)
+    return {**job, "status": "queued"}

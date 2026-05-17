@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # PostgreSQL
     database_url: str = "postgresql://cheeseboard:cheeseboard@localhost:5432/cheeseboard"
 
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
     # Elasticsearch
     elasticsearch_url: str = ""
 
