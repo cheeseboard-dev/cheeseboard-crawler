@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from app import db
-from app.exceptions import ClipNotFoundException, VideoNotFoundException
+from app.core.exceptions import ClipNotFoundException, VideoNotFoundException
 from app.models.clip import ClipResponse
 from app.models.video import VideoResponse
 from app.schemas import ErrorResponse

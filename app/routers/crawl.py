@@ -4,8 +4,8 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app import db
-from app.config import settings
-from app.exceptions import InvalidRequestException
+from app.core.config import settings
+from app.core.exceptions import InvalidRequestException
 from app.queue import (
     enqueue_channels,
     enqueue_home_clips_poll,

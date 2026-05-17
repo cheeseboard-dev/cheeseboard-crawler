@@ -10,8 +10,8 @@ from typing import Literal, TypedDict
 import app.models.clip as clip_models
 import app.models.video as video_models
 from app import db
-from app.config import settings
-from app.exceptions import (
+from app.core.config import settings
+from app.core.exceptions import (
     CrawlJobConflictException,
     CrawlJobNotFoundException,
     InvalidRequestException,

@@ -3,8 +3,8 @@ import hmac
 
 from fastapi import Header
 
-from app.config import settings
-from app.exceptions import InvalidApiKeyException
+from app.core.config import settings
+from app.core.exceptions import InvalidApiKeyException
 
 
 async def require_api_key(x_api_key: str | None = Header(default=None, alias="X-API-Key")):

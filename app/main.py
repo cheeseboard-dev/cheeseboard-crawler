@@ -4,11 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 
 from app import db
-from app.auth import require_api_key
-from app.config import settings
-from app.exception_handlers import cheeseboard_exception_handler, unhandled_exception_handler
-from app.exceptions import CheeseBoardException
-from app.log_config import setup_logging
+from app.core.auth import require_api_key
+from app.core.config import settings
+from app.core.exception_handlers import cheeseboard_exception_handler, unhandled_exception_handler
+from app.core.exceptions import CheeseBoardException
+from app.core.log_config import setup_logging
 from app.queue import close_pool as close_queue_pool
 from app.queue import get_pool as get_queue_pool
 from app.routers import channels, content, crawl, streamers

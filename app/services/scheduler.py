@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app import db
-from app.config import settings
+from app.core.config import settings
 from app.queue import (
     enqueue_channels,
     enqueue_clips_watermark_batch,

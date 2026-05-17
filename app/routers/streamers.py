@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app import db
-from app.exceptions import StreamerNotFoundException
+from app.core.exceptions import StreamerNotFoundException
 from app.models.channel import ChannelResponse
 from app.queue import enqueue_channels
 from app.schemas import (

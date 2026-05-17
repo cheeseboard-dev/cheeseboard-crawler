@@ -7,8 +7,8 @@ from typing import Any
 from arq.connections import RedisSettings
 
 from app import db
-from app.config import settings
-from app.notifier import send_alert
+from app.core.config import settings
+from app.core.notifier import send_alert
 from app.services.chzzk_client import chzzk_client
 from app.services.crawler import (
     CrawlScope,
@@ -21,9 +21,6 @@ from app.services.es_client import es_client
 logger = logging.getLogger(__name__)
 
 
-# ── 잡 완료 처리 ──────────────────────────────────────────────────────────────
-
-
 async def _finalize_job(job_id: str) -> None:
     row = await db.get_crawl_job(job_id)
     if not row:
@@ -31,8 +28,7 @@ async def _finalize_job(job_id: str) -> None:
     total = row.get("total_streamers") or 0
     success = row.get("success_count") or 0
     failed = row.get("failed_count") or 0
-    status = "done" if failed == 0 else "done"  # partial failure도 done으로 처리
-    await db.update_crawl_job(job_id, status=status)
+    await db.update_crawl_job(job_id, status="done")
     logger.info("job=%s finished success=%d failed=%d", job_id, success, failed)
     if total <= 0:
         return
@@ -43,9 +39,6 @@ async def _finalize_job(job_id: str) -> None:
             message=f"job_id={job_id} total={total} success={success} failed={failed} rate={failure_rate:.1%}",
             level="warning",
         )
-
-
-# ── Worker 함수들 ─────────────────────────────────────────────────────────────
 
 
 async def channel_crawl(
@@ -267,11 +260,8 @@ async def live_crawl(
         await db.update_crawl_job(job_id, status="failed", error_msg=str(e))
 
 
-# ── Worker 설정 ───────────────────────────────────────────────────────────────
-
-
 async def startup(ctx: dict[str, Any]) -> None:
-    from app.log_config import setup_logging
+    from app.core.log_config import setup_logging
 
     setup_logging()
     await db.init_pool()

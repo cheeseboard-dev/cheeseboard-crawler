@@ -1,7 +1,7 @@
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from app.exceptions import CheeseBoardException
+from app.core.exceptions import CheeseBoardException
 
 
 async def cheeseboard_exception_handler(request: Request, exc: CheeseBoardException):

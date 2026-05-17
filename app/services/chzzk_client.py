@@ -11,8 +11,8 @@ import httpx
 
 import app.models.clip as clip_models
 import app.models.video as video_models
-from app.config import settings
-from app.exceptions import ChannelNotFoundException, ChzzkAPIException
+from app.core.config import settings
+from app.core.exceptions import ChannelNotFoundException, ChzzkAPIException
 from app.models.channel import ChannelResponse
 
 logger = logging.getLogger(__name__)

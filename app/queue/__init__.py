@@ -6,7 +6,7 @@ from datetime import datetime
 from arq import ArqRedis, create_pool
 from arq.connections import RedisSettings
 
-from app.config import settings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

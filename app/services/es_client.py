@@ -8,7 +8,7 @@ from elasticsearch.helpers import async_bulk
 
 import app.models.clip as clip_models
 import app.models.video as video_models
-from app.config import settings
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
